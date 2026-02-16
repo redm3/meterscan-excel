@@ -1,0 +1,158 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
+};
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    const { imageBase64, mimeType } = await req.json();
+
+    if (!imageBase64) {
+      return new Response(JSON.stringify({ error: 'No image data provided' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+    if (!LOVABLE_API_KEY) {
+      throw new Error('LOVABLE_API_KEY is not configured');
+    }
+
+    const systemPrompt = `You are an expert at extracting meter reading data from documents and images. 
+You will be given an image of a meter reading sheet or table.
+
+Extract ALL meter reading rows from the document. For each row, extract:
+- loadName: The load/tenant name (e.g., "Tenant #01", "Main Incomer", etc.)
+- loadId: The Load ID or Modbus ID (numeric)
+- ctRating: The CT rating (e.g., "1000A", "500A")
+- dateTime: The date and time of the reading (preserve original format)
+- physicalMeterRead: The kWh reading (numeric value)
+- ph1Amps, ph2Amps, ph3Amps: Phase current readings if available
+- voltage: Voltage reading if available
+- pf: Power factor if available
+
+Return the data as a JSON array. If you cannot read a value, use null.
+Be thorough - extract every row visible in the table.`;
+
+    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image_url',
+                image_url: {
+                  url: `data:${mimeType || 'image/png'};base64,${imageBase64}`,
+                },
+              },
+              {
+                type: 'text',
+                text: 'Extract all meter reading data from this document. Return ONLY a JSON array of objects with the fields specified. No markdown, no code blocks, just the JSON array.',
+              },
+            ],
+          },
+        ],
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: "extract_meter_data",
+              description: "Extract meter reading data from the document",
+              parameters: {
+                type: "object",
+                properties: {
+                  readings: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        loadName: { type: "string", description: "Load/tenant name" },
+                        loadId: { type: ["number", "null"], description: "Load ID / Modbus ID" },
+                        ctRating: { type: ["string", "null"], description: "CT rating" },
+                        dateTime: { type: ["string", "null"], description: "Date/time of reading" },
+                        physicalMeterRead: { type: ["number", "null"], description: "kWh reading" },
+                        ph1Amps: { type: ["number", "null"], description: "Phase 1 amps" },
+                        ph2Amps: { type: ["number", "null"], description: "Phase 2 amps" },
+                        ph3Amps: { type: ["number", "null"], description: "Phase 3 amps" },
+                        voltage: { type: ["number", "null"], description: "Voltage reading" },
+                        pf: { type: ["number", "null"], description: "Power factor" },
+                      },
+                      required: ["loadName"],
+                    },
+                  },
+                },
+                required: ["readings"],
+              },
+            },
+          },
+        ],
+        tool_choice: { type: "function", function: { name: "extract_meter_data" } },
+      }),
+    });
+
+    if (!response.ok) {
+      if (response.status === 429) {
+        return new Response(JSON.stringify({ error: 'Rate limit exceeded. Please try again in a moment.' }), {
+          status: 429,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      if (response.status === 402) {
+        return new Response(JSON.stringify({ error: 'AI credits exhausted. Please add credits in Settings.' }), {
+          status: 402,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      const errorText = await response.text();
+      console.error('AI gateway error:', response.status, errorText);
+      throw new Error(`AI gateway error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    
+    // Extract from tool call response
+    const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+    let readings = [];
+    
+    if (toolCall?.function?.arguments) {
+      const parsed = JSON.parse(toolCall.function.arguments);
+      readings = parsed.readings || [];
+    } else {
+      // Fallback: try parsing content directly
+      const content = data.choices?.[0]?.message?.content || '';
+      try {
+        const cleaned = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+        readings = JSON.parse(cleaned);
+        if (!Array.isArray(readings)) readings = [readings];
+      } catch {
+        console.error('Failed to parse AI response:', content);
+        readings = [];
+      }
+    }
+
+    return new Response(JSON.stringify({ readings }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  } catch (error) {
+    console.error('Extract meter data error:', error);
+    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+});

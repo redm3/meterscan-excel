@@ -1,0 +1,4 @@
+project_id = "mlauqahzvgaijszyghqi"
+
+[functions.extract-meter-data]
+verify_jwt = false
