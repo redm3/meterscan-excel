@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import FileDropZone from "@/components/FileDropZone";
 import DataPreviewTable from "@/components/DataPreviewTable";
 import ExportSettingsPanel from "@/components/ExportSettingsPanel";
+import DocumentPreview from "@/components/DocumentPreview";
 import { MeterReading, ExportSettings } from "@/types/meter";
 import { generateValidationExcel } from "@/lib/excelGenerator";
 import { supabase } from "@/integrations/supabase/client";
@@ -12,6 +13,8 @@ import { supabase } from "@/integrations/supabase/client";
 const Index = () => {
   const [readings, setReadings] = useState<MeterReading[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [previewFile, setPreviewFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [settings, setSettings] = useState<ExportSettings>({
     siteName: "",
     buildingName: "",
@@ -41,6 +44,11 @@ const Index = () => {
       toast.error("File too large. Maximum size is 20MB.");
       return;
     }
+
+    // Set preview
+    setPreviewFile(file);
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(URL.createObjectURL(file));
 
     setIsProcessing(true);
     try {
@@ -104,8 +112,15 @@ const Index = () => {
     }
   }, [readings, settings]);
 
+  const clearPreview = () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewFile(null);
+    setPreviewUrl(null);
+  };
+
   const handleClear = () => {
     setReadings([]);
+    clearPreview();
     toast.info("Data cleared.");
   };
 
@@ -151,6 +166,9 @@ const Index = () => {
       <main className="mx-auto max-w-7xl space-y-6 px-6 py-8">
         {/* Drop Zone */}
         <FileDropZone onFileSelected={handleFileSelected} isProcessing={isProcessing} />
+
+        {/* Document Preview */}
+        <DocumentPreview file={previewFile} previewUrl={previewUrl} onClear={clearPreview} />
 
         {/* Export Settings */}
         <div className="space-y-2">
