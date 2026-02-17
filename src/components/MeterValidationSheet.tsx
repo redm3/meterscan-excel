@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,21 +13,56 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { ChevronDown, HelpCircle, Printer } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ChevronDown, HelpCircle, Printer, LinkIcon } from "lucide-react";
+import { MeterReading } from "@/types/meter";
 
-const MeterValidationSheet = () => {
-  const [loggerDate1, setLoggerDate1] = useState("2/02/2026 4:30pm");
-  const [loggerDate2, setLoggerDate2] = useState("4/02/2026 8:56am");
-  const [refDate1, setRefDate1] = useState("2/2/2026 16:30");
-  const [refDate2, setRefDate2] = useState("4/2/2026 9:00");
+interface MeterValidationSheetProps {
+  readings: MeterReading[];
+}
 
-  const [loggerReading1, setLoggerReading1] = useState(3293.777);
-  const [loggerReading2, setLoggerReading2] = useState(3301.689);
-  const [refReading1, setRefReading1] = useState(8);
-  const [refReading2, setRefReading2] = useState(777);
+const MeterValidationSheet = ({ readings }: MeterValidationSheetProps) => {
+  // Selected row indices from the extracted data
+  const [loggerRow1Idx, setLoggerRow1Idx] = useState<string>("");
+  const [loggerRow2Idx, setLoggerRow2Idx] = useState<string>("");
+  const [refRow1Idx, setRefRow1Idx] = useState<string>("");
+  const [refRow2Idx, setRefRow2Idx] = useState<string>("");
 
   const [multiplier, setMultiplier] = useState(100);
   const [formulasOpen, setFormulasOpen] = useState(false);
+
+  // Auto-select first two rows when data comes in
+  useEffect(() => {
+    if (readings.length >= 2 && !loggerRow1Idx && !loggerRow2Idx) {
+      setLoggerRow1Idx(readings[0].id);
+      setLoggerRow2Idx(readings[1].id);
+    }
+    if (readings.length >= 4 && !refRow1Idx && !refRow2Idx) {
+      setRefRow1Idx(readings[2].id);
+      setRefRow2Idx(readings[3].id);
+    } else if (readings.length >= 2 && !refRow1Idx && !refRow2Idx) {
+      setRefRow1Idx(readings[0].id);
+      setRefRow2Idx(readings[1].id);
+    }
+  }, [readings]);
+
+  const getRow = (id: string) => readings.find((r) => r.id === id);
+
+  const loggerRow1 = getRow(loggerRow1Idx);
+  const loggerRow2 = getRow(loggerRow2Idx);
+  const refRow1 = getRow(refRow1Idx);
+  const refRow2 = getRow(refRow2Idx);
+
+  const loggerReading1 = loggerRow1?.physicalMeterRead ?? 0;
+  const loggerReading2 = loggerRow2?.physicalMeterRead ?? 0;
+  const refReading1 = refRow1?.physicalMeterRead ?? 0;
+  const refReading2 = refRow2?.physicalMeterRead ?? 0;
 
   const loggerDiff = useMemo(() => loggerReading2 - loggerReading1, [loggerReading1, loggerReading2]);
   const refDiff = useMemo(() => refReading2 - refReading1, [refReading1, refReading2]);
@@ -41,23 +76,24 @@ const MeterValidationSheet = () => {
   };
 
   const isPass = accuracy >= 95 && accuracy <= 105;
+  const hasData = readings.length >= 2;
 
-  const numInput = (value: number, onChange: (v: number) => void) => (
-    <Input
-      type="number"
-      step="any"
-      value={value}
-      onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
-      className="h-8 w-32 bg-card border-border font-mono text-sm text-right"
-    />
-  );
+  const rowLabel = (r: MeterReading) =>
+    `${r.loadName}${r.physicalMeterRead != null ? ` — ${r.physicalMeterRead} kWh` : ""}${r.dateTime ? ` (${r.dateTime})` : ""}`;
 
-  const textInput = (value: string, onChange: (v: string) => void) => (
-    <Input
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="h-8 w-44 bg-card border-border font-mono text-sm"
-    />
+  const RowSelector = ({ value, onChange, label }: { value: string; onChange: (v: string) => void; label: string }) => (
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger className="h-8 w-full bg-card border-border font-mono text-sm">
+        <SelectValue placeholder={label} />
+      </SelectTrigger>
+      <SelectContent>
+        {readings.map((r) => (
+          <SelectItem key={r.id} value={r.id} className="font-mono text-sm">
+            {rowLabel(r)}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 
   const FormulaTooltip = ({ text }: { text: string }) => (
@@ -73,19 +109,28 @@ const MeterValidationSheet = () => {
     </TooltipProvider>
   );
 
+  if (!hasData) {
+    return (
+      <div className="rounded-lg border border-border bg-surface p-8 text-center">
+        <LinkIcon className="h-8 w-8 mx-auto text-muted-foreground mb-3" />
+        <p className="text-muted-foreground text-sm">
+          Upload a meter read sheet and extract data to use the validation tool.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-lg border border-border bg-surface overflow-hidden">
       {/* Header */}
       <div className="bg-secondary px-5 py-3 border-b border-border">
         <h3 className="text-base font-bold text-foreground tracking-tight">Meter Read Validation Sheet</h3>
-        <div className="flex gap-6 mt-1.5 text-xs text-muted-foreground font-mono">
-          <span>Main Incomer</span>
-          <span>ICP: <span className="text-foreground">1002080192</span></span>
-          <span>LCC: <span className="text-foreground">8C</span></span>
-        </div>
+        <p className="text-xs text-muted-foreground mt-1">
+          Select rows from the extracted data to compare logger vs reference readings.
+        </p>
       </div>
 
-      {/* Readings Table */}
+      {/* Row Selection Table */}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -97,24 +142,35 @@ const MeterValidationSheet = () => {
           </thead>
           <tbody className="divide-y divide-border">
             <tr className="hover:bg-surface-elevated">
-              <td className="px-4 py-2 text-muted-foreground font-medium text-xs">Date / Time (1st)</td>
-              <td className="px-4 py-2 text-center">{textInput(loggerDate1, setLoggerDate1)}</td>
-              <td className="px-4 py-2 text-center">{textInput(refDate1, setRefDate1)}</td>
+              <td className="px-4 py-2 text-muted-foreground font-medium text-xs">1st Reading Row</td>
+              <td className="px-4 py-2"><RowSelector value={loggerRow1Idx} onChange={setLoggerRow1Idx} label="Select 1st logger row" /></td>
+              <td className="px-4 py-2"><RowSelector value={refRow1Idx} onChange={setRefRow1Idx} label="Select 1st reference row" /></td>
             </tr>
             <tr className="hover:bg-surface-elevated">
-              <td className="px-4 py-2 text-muted-foreground font-medium text-xs">Reading (kWh)</td>
-              <td className="px-4 py-2 text-center">{numInput(loggerReading1, setLoggerReading1)}</td>
-              <td className="px-4 py-2 text-center">{numInput(refReading1, setRefReading1)}</td>
+              <td className="px-4 py-2 text-muted-foreground font-medium text-xs">2nd Reading Row</td>
+              <td className="px-4 py-2"><RowSelector value={loggerRow2Idx} onChange={setLoggerRow2Idx} label="Select 2nd logger row" /></td>
+              <td className="px-4 py-2"><RowSelector value={refRow2Idx} onChange={setRefRow2Idx} label="Select 2nd reference row" /></td>
             </tr>
-            <tr className="hover:bg-surface-elevated">
-              <td className="px-4 py-2 text-muted-foreground font-medium text-xs">Date / Time (2nd)</td>
-              <td className="px-4 py-2 text-center">{textInput(loggerDate2, setLoggerDate2)}</td>
-              <td className="px-4 py-2 text-center">{textInput(refDate2, setRefDate2)}</td>
+            {/* Show resolved values */}
+            <tr className="bg-secondary/20">
+              <td className="px-4 py-2 text-muted-foreground font-medium text-xs">Date/Time (1st)</td>
+              <td className="px-4 py-2 text-center font-mono text-sm text-foreground">{loggerRow1?.dateTime ?? "—"}</td>
+              <td className="px-4 py-2 text-center font-mono text-sm text-foreground">{refRow1?.dateTime ?? "—"}</td>
             </tr>
-            <tr className="hover:bg-surface-elevated">
-              <td className="px-4 py-2 text-muted-foreground font-medium text-xs">Reading (kWh)</td>
-              <td className="px-4 py-2 text-center">{numInput(loggerReading2, setLoggerReading2)}</td>
-              <td className="px-4 py-2 text-center">{numInput(refReading2, setRefReading2)}</td>
+            <tr className="bg-secondary/20">
+              <td className="px-4 py-2 text-muted-foreground font-medium text-xs">Reading (kWh) — 1st</td>
+              <td className="px-4 py-2 text-center font-mono text-sm text-foreground">{loggerReading1.toFixed(3)}</td>
+              <td className="px-4 py-2 text-center font-mono text-sm text-foreground">{refReading1.toFixed(3)}</td>
+            </tr>
+            <tr className="bg-secondary/20">
+              <td className="px-4 py-2 text-muted-foreground font-medium text-xs">Date/Time (2nd)</td>
+              <td className="px-4 py-2 text-center font-mono text-sm text-foreground">{loggerRow2?.dateTime ?? "—"}</td>
+              <td className="px-4 py-2 text-center font-mono text-sm text-foreground">{refRow2?.dateTime ?? "—"}</td>
+            </tr>
+            <tr className="bg-secondary/20">
+              <td className="px-4 py-2 text-muted-foreground font-medium text-xs">Reading (kWh) — 2nd</td>
+              <td className="px-4 py-2 text-center font-mono text-sm text-foreground">{loggerReading2.toFixed(3)}</td>
+              <td className="px-4 py-2 text-center font-mono text-sm text-foreground">{refReading2.toFixed(3)}</td>
             </tr>
           </tbody>
         </table>
@@ -125,7 +181,6 @@ const MeterValidationSheet = () => {
         <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Calculated Results</h4>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {/* CT Multiplier */}
           <div className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2">
             <span className="text-xs text-muted-foreground whitespace-nowrap">CT Multiplier</span>
             <FormulaTooltip text="The CT ratio (e.g. 100:1). The physical meter measures scaled-down current; actual energy = meter reading × CT multiplier." />
@@ -137,21 +192,18 @@ const MeterValidationSheet = () => {
             />
           </div>
 
-          {/* Logger Diff */}
           <div className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2">
             <span className="text-xs text-muted-foreground whitespace-nowrap">Logger Diff</span>
             <FormulaTooltip text="Reading₂ − Reading₁: The raw kWh difference recorded by the logger between the two timestamps." />
             <span className="font-mono text-sm text-foreground ml-auto">{loggerDiff.toFixed(3)} kWh</span>
           </div>
 
-          {/* Reference Diff */}
           <div className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2">
             <span className="text-xs text-muted-foreground whitespace-nowrap">Reference Diff</span>
             <FormulaTooltip text="RefReading₂ − RefReading₁: The kWh difference from the independent clamp meter — your ground truth." />
             <span className="font-mono text-sm text-foreground ml-auto">{refDiff.toFixed(1)} kWh</span>
           </div>
 
-          {/* Actual kWh */}
           <div className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2">
             <span className="text-xs text-muted-foreground whitespace-nowrap">Actual kWh</span>
             <FormulaTooltip text="Logger Diff × CT Multiplier: Scales the logger's secondary-side reading to real-world primary-side energy." />
@@ -173,7 +225,6 @@ const MeterValidationSheet = () => {
           </div>
         </div>
 
-        {/* Print button */}
         <div className="flex justify-end pt-1">
           <Button variant="outline" size="sm" className="gap-2" onClick={() => window.print()}>
             <Printer className="h-3.5 w-3.5" />

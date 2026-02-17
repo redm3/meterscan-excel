@@ -208,7 +208,7 @@ const Index = () => {
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
             Meter Read Validation
           </h2>
-          <MeterValidationSheet />
+          <MeterValidationSheet readings={readings} />
         </div>
 
         {/* Actions */}
