@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ChevronDown, HelpCircle, Printer, LinkIcon } from "lucide-react";
+import { ChevronDown, HelpCircle, Printer, LinkIcon, Calculator } from "lucide-react";
 import { MeterReading } from "@/types/meter";
 
 interface MeterValidationSheetProps {
@@ -64,10 +64,28 @@ const MeterValidationSheet = ({ readings }: MeterValidationSheetProps) => {
   const refReading1 = refRow1?.physicalMeterRead ?? 0;
   const refReading2 = refRow2?.physicalMeterRead ?? 0;
 
-  const loggerDiff = useMemo(() => loggerReading2 - loggerReading1, [loggerReading1, loggerReading2]);
-  const refDiff = useMemo(() => refReading2 - refReading1, [refReading1, refReading2]);
-  const actualKwh = useMemo(() => loggerDiff * multiplier, [loggerDiff, multiplier]);
-  const accuracy = useMemo(() => (refDiff !== 0 ? (actualKwh / refDiff) * 100 : 0), [actualKwh, refDiff]);
+  const [calculated, setCalculated] = useState(false);
+  const [loggerDiff, setLoggerDiff] = useState(0);
+  const [refDiff, setRefDiff] = useState(0);
+  const [actualKwh, setActualKwh] = useState(0);
+  const [accuracy, setAccuracy] = useState(0);
+
+  // Reset calculated state when inputs change
+  useEffect(() => {
+    setCalculated(false);
+  }, [loggerRow1Idx, loggerRow2Idx, refRow1Idx, refRow2Idx, multiplier, readings]);
+
+  const handleCalculate = () => {
+    const diff = loggerReading2 - loggerReading1;
+    const rDiff = refReading2 - refReading1;
+    const actual = diff * multiplier;
+    const acc = rDiff !== 0 ? (actual / rDiff) * 100 : 0;
+    setLoggerDiff(diff);
+    setRefDiff(rDiff);
+    setActualKwh(actual);
+    setAccuracy(acc);
+    setCalculated(true);
+  };
 
   const getAccuracyColor = (val: number) => {
     if (val >= 95 && val <= 105) return "bg-green-600/20 text-green-400 border-green-600/40";
@@ -75,7 +93,7 @@ const MeterValidationSheet = ({ readings }: MeterValidationSheetProps) => {
     return "bg-red-600/20 text-red-400 border-red-600/40";
   };
 
-  const isPass = accuracy >= 95 && accuracy <= 105;
+  const isPass = calculated && accuracy >= 95 && accuracy <= 105;
   const hasData = readings.length >= 2;
 
   const rowLabel = (r: MeterReading) =>
@@ -176,9 +194,19 @@ const MeterValidationSheet = ({ readings }: MeterValidationSheetProps) => {
         </table>
       </div>
 
-      {/* Calculated Fields */}
+      {/* Calculate Button */}
       <div className="border-t border-border bg-secondary/30 px-5 py-4 space-y-3">
-        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Calculated Results</h4>
+        <div className="flex items-center justify-between mb-3">
+          <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Calculated Results</h4>
+          <Button
+            onClick={handleCalculate}
+            size="sm"
+            className={`gap-2 ${!calculated ? 'animate-pulse' : ''}`}
+          >
+            <Calculator className="h-3.5 w-3.5" />
+            {calculated ? "Recalculate" : "Calculate Accuracy"}
+          </Button>
+        </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2">
@@ -195,35 +223,41 @@ const MeterValidationSheet = ({ readings }: MeterValidationSheetProps) => {
           <div className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2">
             <span className="text-xs text-muted-foreground whitespace-nowrap">Logger Diff</span>
             <FormulaTooltip text="Reading₂ − Reading₁: The raw kWh difference recorded by the logger between the two timestamps." />
-            <span className="font-mono text-sm text-foreground ml-auto">{loggerDiff.toFixed(3)} kWh</span>
+            <span className="font-mono text-sm text-foreground ml-auto">{calculated ? `${loggerDiff.toFixed(3)} kWh` : "—"}</span>
           </div>
 
           <div className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2">
             <span className="text-xs text-muted-foreground whitespace-nowrap">Reference Diff</span>
             <FormulaTooltip text="RefReading₂ − RefReading₁: The kWh difference from the independent clamp meter — your ground truth." />
-            <span className="font-mono text-sm text-foreground ml-auto">{refDiff.toFixed(1)} kWh</span>
+            <span className="font-mono text-sm text-foreground ml-auto">{calculated ? `${refDiff.toFixed(1)} kWh` : "—"}</span>
           </div>
 
           <div className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2">
             <span className="text-xs text-muted-foreground whitespace-nowrap">Actual kWh</span>
             <FormulaTooltip text="Logger Diff × CT Multiplier: Scales the logger's secondary-side reading to real-world primary-side energy." />
-            <span className="font-mono text-sm text-foreground ml-auto">{actualKwh.toFixed(1)} kWh</span>
+            <span className="font-mono text-sm text-foreground ml-auto">{calculated ? `${actualKwh.toFixed(1)} kWh` : "—"}</span>
           </div>
         </div>
 
         {/* Accuracy */}
-        <div className={`flex items-center justify-between rounded-md border px-4 py-3 ${getAccuracyColor(accuracy)}`}>
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold">Accuracy</span>
-            <FormulaTooltip text="(Actual kWh ÷ Reference kWh) × 100. Anything within ±5% (95–105%) is typically accepted as a commissioning pass." />
+        {calculated ? (
+          <div className={`flex items-center justify-between rounded-md border px-4 py-3 ${getAccuracyColor(accuracy)}`}>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold">Accuracy</span>
+              <FormulaTooltip text="(Actual kWh ÷ Reference kWh) × 100. Anything within ±5% (95–105%) is typically accepted as a commissioning pass." />
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="font-mono text-lg font-bold">{accuracy.toFixed(1)}%</span>
+              <Badge variant={isPass ? "default" : "destructive"} className={isPass ? "bg-green-600 hover:bg-green-700" : ""}>
+                {isPass ? "PASS" : "FAIL"}
+              </Badge>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="font-mono text-lg font-bold">{accuracy.toFixed(1)}%</span>
-            <Badge variant={isPass ? "default" : "destructive"} className={isPass ? "bg-green-600 hover:bg-green-700" : ""}>
-              {isPass ? "PASS" : "FAIL"}
-            </Badge>
+        ) : (
+          <div className="flex items-center justify-center rounded-md border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
+            Press "Calculate Accuracy" to run validation
           </div>
-        </div>
+        )}
 
         <div className="flex justify-end pt-1">
           <Button variant="outline" size="sm" className="gap-2" onClick={() => window.print()}>
