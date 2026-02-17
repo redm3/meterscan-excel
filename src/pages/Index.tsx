@@ -6,6 +6,7 @@ import FileDropZone from "@/components/FileDropZone";
 import DataPreviewTable from "@/components/DataPreviewTable";
 import ExportSettingsPanel from "@/components/ExportSettingsPanel";
 import DocumentPreview from "@/components/DocumentPreview";
+import MeterValidationSheet from "@/components/MeterValidationSheet";
 import { MeterReading, ExportSettings } from "@/types/meter";
 import { generateValidationExcel } from "@/lib/excelGenerator";
 import { supabase } from "@/integrations/supabase/client";
@@ -200,6 +201,14 @@ const Index = () => {
             </Button>
           </div>
           <DataPreviewTable data={readings} onDataChange={setReadings} />
+        </div>
+
+        {/* Meter Validation Sheet */}
+        <div className="space-y-2">
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+            Meter Read Validation
+          </h2>
+          <MeterValidationSheet />
         </div>
 
         {/* Actions */}
