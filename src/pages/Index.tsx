@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { toast } from "sonner";
-import { Zap, Download, RotateCcw, Plus } from "lucide-react";
+import { Download, RotateCcw, Plus } from "lucide-react";
+import bravegenLogo from "@/assets/bravegen-logo.svg";
 import { Button } from "@/components/ui/button";
 import FileDropZone from "@/components/FileDropZone";
 import DataPreviewTable from "@/components/DataPreviewTable";
@@ -149,10 +150,8 @@ const Index = () => {
       {/* Header */}
       <header className="border-b border-border bg-card">
         <div className="mx-auto flex max-w-7xl items-center gap-3 px-6 py-4">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary">
-            <Zap className="h-5 w-5 text-primary-foreground" />
-          </div>
-          <div>
+          <img src={bravegenLogo} alt="BraveGen" className="h-10" />
+          <div className="hidden sm:block">
             <h1 className="text-xl font-bold text-foreground tracking-tight">
               Meter Data Validation Tool
             </h1>
