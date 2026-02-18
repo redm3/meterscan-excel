@@ -28,11 +28,11 @@ interface MeterValidationSheetProps {
 }
 
 const MeterValidationSheet = ({ readings }: MeterValidationSheetProps) => {
-  // Selected row indices from the extracted data
   const [loggerRow1Idx, setLoggerRow1Idx] = useState<string>("");
   const [loggerRow2Idx, setLoggerRow2Idx] = useState<string>("");
   const [refRow1Idx, setRefRow1Idx] = useState<string>("");
   const [refRow2Idx, setRefRow2Idx] = useState<string>("");
+  const [serialNumber, setSerialNumber] = useState<string>("");
 
   const [multiplier, setMultiplier] = useState(100);
   const [formulasOpen, setFormulasOpen] = useState(false);
@@ -144,8 +144,18 @@ const MeterValidationSheet = ({ readings }: MeterValidationSheetProps) => {
       <div className="bg-secondary px-5 py-3 border-b border-border">
         <h3 className="text-base font-bold text-foreground tracking-tight">Meter Read Validation Sheet</h3>
         <p className="text-xs text-muted-foreground mt-1">
-          Select rows from the extracted data to compare logger vs reference readings.
+          Select rows from the extracted data to compare retail meter vs kWh readings.
         </p>
+        <div className="flex items-center gap-3 mt-2">
+          <span className="text-xs text-muted-foreground whitespace-nowrap">Retail Meter Serial No.</span>
+          <Input
+            type="text"
+            value={serialNumber}
+            onChange={(e) => setSerialNumber(e.target.value)}
+            placeholder="Enter serial number"
+            className="h-7 w-48 bg-background border-border font-mono text-sm"
+          />
+        </div>
       </div>
 
       {/* Row Selection Table */}
@@ -154,20 +164,20 @@ const MeterValidationSheet = ({ readings }: MeterValidationSheetProps) => {
           <thead>
             <tr className="border-b border-border bg-secondary/60">
               <th className="px-4 py-2.5 text-left font-semibold text-muted-foreground text-xs uppercase tracking-wider w-36">Field</th>
-              <th className="px-4 py-2.5 text-center font-semibold text-muted-foreground text-xs uppercase tracking-wider">Main Incomer (Logger)</th>
-              <th className="px-4 py-2.5 text-center font-semibold text-muted-foreground text-xs uppercase tracking-wider">Reference Meter (Clamp)</th>
+              <th className="px-4 py-2.5 text-center font-semibold text-muted-foreground text-xs uppercase tracking-wider">Retail Meter / Supply Authority Meter</th>
+              <th className="px-4 py-2.5 text-center font-semibold text-muted-foreground text-xs uppercase tracking-wider">kWh Readings from Meter</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
             <tr className="hover:bg-surface-elevated">
               <td className="px-4 py-2 text-muted-foreground font-medium text-xs">1st Reading Row</td>
-              <td className="px-4 py-2"><RowSelector value={loggerRow1Idx} onChange={setLoggerRow1Idx} label="Select 1st logger row" /></td>
-              <td className="px-4 py-2"><RowSelector value={refRow1Idx} onChange={setRefRow1Idx} label="Select 1st reference row" /></td>
+              <td className="px-4 py-2"><RowSelector value={loggerRow1Idx} onChange={setLoggerRow1Idx} label="Select 1st retail meter row" /></td>
+              <td className="px-4 py-2"><RowSelector value={refRow1Idx} onChange={setRefRow1Idx} label="Select 1st kWh reading row" /></td>
             </tr>
             <tr className="hover:bg-surface-elevated">
               <td className="px-4 py-2 text-muted-foreground font-medium text-xs">2nd Reading Row</td>
-              <td className="px-4 py-2"><RowSelector value={loggerRow2Idx} onChange={setLoggerRow2Idx} label="Select 2nd logger row" /></td>
-              <td className="px-4 py-2"><RowSelector value={refRow2Idx} onChange={setRefRow2Idx} label="Select 2nd reference row" /></td>
+              <td className="px-4 py-2"><RowSelector value={loggerRow2Idx} onChange={setLoggerRow2Idx} label="Select 2nd retail meter row" /></td>
+              <td className="px-4 py-2"><RowSelector value={refRow2Idx} onChange={setRefRow2Idx} label="Select 2nd kWh reading row" /></td>
             </tr>
             {/* Show resolved values */}
             <tr className="bg-secondary/20">
