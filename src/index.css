@@ -6,61 +6,61 @@
 
 @layer base {
   :root {
-    --background: 222 47% 11%;
-    --foreground: 210 40% 96%;
+    --background: 160 30% 6%;
+    --foreground: 0 0% 96%;
 
-    --card: 222 47% 14%;
-    --card-foreground: 210 40% 96%;
+    --card: 160 25% 10%;
+    --card-foreground: 0 0% 96%;
 
-    --popover: 222 47% 14%;
-    --popover-foreground: 210 40% 96%;
+    --popover: 160 25% 10%;
+    --popover-foreground: 0 0% 96%;
 
-    --primary: 217 91% 60%;
-    --primary-foreground: 222 47% 6%;
+    --primary: 95 40% 53%;
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 222 47% 18%;
-    --secondary-foreground: 210 40% 90%;
+    --secondary: 160 20% 14%;
+    --secondary-foreground: 0 0% 90%;
 
-    --muted: 222 30% 20%;
-    --muted-foreground: 215 20% 55%;
+    --muted: 160 15% 16%;
+    --muted-foreground: 150 10% 55%;
 
-    --accent: 38 92% 50%;
-    --accent-foreground: 222 47% 6%;
+    --accent: 95 50% 45%;
+    --accent-foreground: 0 0% 100%;
 
     --destructive: 0 84% 60%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive-foreground: 0 0% 98%;
 
-    --border: 217 30% 22%;
-    --input: 217 30% 22%;
-    --ring: 217 91% 60%;
+    --border: 160 15% 18%;
+    --input: 160 15% 18%;
+    --ring: 95 40% 53%;
 
     --radius: 0.5rem;
 
-    --sidebar-background: 222 47% 9%;
-    --sidebar-foreground: 210 40% 96%;
-    --sidebar-primary: 217 91% 60%;
-    --sidebar-primary-foreground: 222 47% 6%;
-    --sidebar-accent: 222 47% 16%;
-    --sidebar-accent-foreground: 210 40% 96%;
-    --sidebar-border: 217 30% 22%;
-    --sidebar-ring: 217 91% 60%;
+    --sidebar-background: 160 30% 5%;
+    --sidebar-foreground: 0 0% 96%;
+    --sidebar-primary: 95 40% 53%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 160 20% 12%;
+    --sidebar-accent-foreground: 0 0% 96%;
+    --sidebar-border: 160 15% 18%;
+    --sidebar-ring: 95 40% 53%;
 
     /* Custom tokens */
-    --success: 100 60% 40%;
-    --success-foreground: 100 60% 95%;
+    --success: 95 40% 53%;
+    --success-foreground: 0 0% 100%;
     --warning: 38 92% 50%;
     --warning-foreground: 38 92% 10%;
-    --surface: 222 47% 16%;
-    --surface-elevated: 222 47% 19%;
+    --surface: 160 20% 12%;
+    --surface-elevated: 160 20% 15%;
 
     /* Excel color tokens */
     --excel-yellow: 60 100% 50%;
-    --excel-green: 88 55% 57%;
+    --excel-green: 95 40% 53%;
     --excel-orange: 30 100% 50%;
 
     /* Gradient */
-    --gradient-primary: linear-gradient(135deg, hsl(217 91% 60%), hsl(217 91% 45%));
-    --gradient-surface: linear-gradient(180deg, hsl(222 47% 16%), hsl(222 47% 12%));
+    --gradient-primary: linear-gradient(135deg, hsl(95 40% 53%), hsl(95 40% 38%));
+    --gradient-surface: linear-gradient(180deg, hsl(160 20% 12%), hsl(160 25% 8%));
   }
 }
 
