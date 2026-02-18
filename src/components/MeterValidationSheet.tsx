@@ -37,55 +37,18 @@ const MeterValidationSheet = ({ readings }: MeterValidationSheetProps) => {
   const [multiplier, setMultiplier] = useState(100);
   const [formulasOpen, setFormulasOpen] = useState(false);
 
-  // Auto-match rows by load name patterns
+  // Auto-select first two rows when data comes in
   useEffect(() => {
-    if (readings.length < 2) return;
-    if (loggerRow1Idx || loggerRow2Idx || refRow1Idx || refRow2Idx) return;
-
-    const normalize = (s: string) => s.toLowerCase().replace(/[_\s]+/g, " ").trim();
-
-    const retailPatterns = ["retail", "supply authority", "retailer"];
-    const incomerPatterns = ["main incomer", "incomer", "msb"];
-
-    const isRetail = (name: string) => {
-      const n = normalize(name);
-      return retailPatterns.some((p) => n.includes(p));
-    };
-    const isIncomer = (name: string) => {
-      const n = normalize(name);
-      return incomerPatterns.some((p) => n.includes(p));
-    };
-
-    const retailRows = readings.filter((r) => isRetail(r.loadName));
-    const incomerRows = readings.filter((r) => isIncomer(r.loadName));
-
-    // Left side: Retail Meter rows
-    if (retailRows.length >= 2) {
-      setLoggerRow1Idx(retailRows[0].id);
-      setLoggerRow2Idx(retailRows[1].id);
-    } else if (retailRows.length === 1) {
-      setLoggerRow1Idx(retailRows[0].id);
-    }
-
-    // Right side: Main Incomer / kWh rows
-    if (incomerRows.length >= 2) {
-      setRefRow1Idx(incomerRows[0].id);
-      setRefRow2Idx(incomerRows[1].id);
-    } else if (incomerRows.length === 1) {
-      setRefRow1Idx(incomerRows[0].id);
-    }
-
-    // Fallback: if no pattern matched, use first two rows for both
-    if (retailRows.length === 0 && incomerRows.length === 0) {
+    if (readings.length >= 2 && !loggerRow1Idx && !loggerRow2Idx) {
       setLoggerRow1Idx(readings[0].id);
       setLoggerRow2Idx(readings[1].id);
-      if (readings.length >= 4) {
-        setRefRow1Idx(readings[2].id);
-        setRefRow2Idx(readings[3].id);
-      } else {
-        setRefRow1Idx(readings[0].id);
-        setRefRow2Idx(readings[1].id);
-      }
+    }
+    if (readings.length >= 4 && !refRow1Idx && !refRow2Idx) {
+      setRefRow1Idx(readings[2].id);
+      setRefRow2Idx(readings[3].id);
+    } else if (readings.length >= 2 && !refRow1Idx && !refRow2Idx) {
+      setRefRow1Idx(readings[0].id);
+      setRefRow2Idx(readings[1].id);
     }
   }, [readings]);
 
