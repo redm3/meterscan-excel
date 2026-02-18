@@ -25,21 +25,28 @@ serve(async (req) => {
       throw new Error('LOVABLE_API_KEY is not configured');
     }
 
-    const systemPrompt = `You are an expert at extracting meter reading data from documents and images. 
-You will be given an image of a meter reading sheet or table.
+    const systemPrompt = `You are an expert at extracting meter reading data from documents, PDFs, and images.
+You will be given a document containing meter reading sheets, tables, or logs.
 
-Extract ALL meter reading rows from the document. For each row, extract:
+CRITICAL INSTRUCTIONS:
+- You MUST extract EVERY SINGLE ROW from ALL pages of the document. Do NOT skip any rows.
+- Scan the ENTIRE document thoroughly - check every page, every table, every section.
+- If a table spans multiple pages, combine all rows from all pages.
+- If values are partially obscured or hard to read, make your best attempt rather than skipping the row.
+- Include header rows or summary rows only if they contain actual meter reading data.
+
+For each row, extract:
 - loadName: The load/tenant name (e.g., "Tenant #01", "Main Incomer", etc.)
 - loadId: The Load ID or Modbus ID (numeric)
 - ctRating: The CT rating (e.g., "1000A", "500A")
-- dateTime: The date and time of the reading (preserve original format)
+- dateTime: The date and time of the reading (preserve original format exactly as shown)
 - physicalMeterRead: The kWh reading (numeric value)
 - ph1Amps, ph2Amps, ph3Amps: Phase current readings if available
 - voltage: Voltage reading if available
 - pf: Power factor if available
 
-Return the data as a JSON array. If you cannot read a value, use null.
-Be thorough - extract every row visible in the table.`;
+If you cannot read a value, use null - but NEVER skip the entire row.
+Double-check your count against the visible rows in the document.`;
 
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
@@ -48,7 +55,7 @@ Be thorough - extract every row visible in the table.`;
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
+        model: 'google/gemini-2.5-pro',
         messages: [
           { role: 'system', content: systemPrompt },
           {
@@ -62,7 +69,7 @@ Be thorough - extract every row visible in the table.`;
               },
               {
                 type: 'text',
-                text: 'Extract all meter reading data from this document. Return ONLY a JSON array of objects with the fields specified. No markdown, no code blocks, just the JSON array.',
+                text: 'Extract ALL meter reading data from EVERY page of this document. Do not skip any rows. Count the total rows you find and make sure every single one is included in your output. Be extremely thorough.',
               },
             ],
           },
