@@ -23,208 +23,221 @@ import { MeterReading } from "@/types/meter";
 
 interface BravegenRow {
   event: string;
+  eventDate: Date | null;
   loadName: string;
   channelKey: string;
-  referenceUtilityType: string;
+  reference: string;
+  utilityType: string;
   unit: string;
   usage: number | null;
-  dateTime: string;
 }
 
 interface BravegenComparisonProps {
   readings: MeterReading[];
 }
 
-/** Try to parse an Excel serial date or a string date */
+/**
+ * Parse dates like "20/02/2026 00:15:00" (dd/MM/yyyy HH:mm:ss)
+ * or ISO or Excel serial numbers.
+ */
 function parseDate(val: any): Date | null {
-  if (val == null) return null;
+  if (val == null || val === "") return null;
   // Excel serial number
   if (typeof val === "number") {
     const epoch = new Date(1899, 11, 30);
     return new Date(epoch.getTime() + val * 86400000);
   }
-  const d = new Date(val);
+  if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
+  const s = String(val).trim();
+  // dd/MM/yyyy HH:mm:ss
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (m) {
+    return new Date(+m[3], +m[2] - 1, +m[1], +m[4], +m[5], +(m[6] || 0));
+  }
+  // yyyy-MM-dd or ISO
+  const d = new Date(s);
   return isNaN(d.getTime()) ? null : d;
 }
 
-/** Round a date to the nearest hour */
-function roundToNearestHour(d: Date): Date {
-  const rounded = new Date(d);
-  if (rounded.getMinutes() >= 30) {
-    rounded.setHours(rounded.getHours() + 1);
-  }
-  rounded.setMinutes(0, 0, 0);
-  return rounded;
-}
-
-function formatDate(d: Date): string {
+function formatDateTime(d: Date): string {
   return d.toLocaleString("en-NZ", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
+    day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "2-digit", minute: "2-digit", hour12: false,
   });
 }
 
-/** Normalise a header string for flexible matching */
-function normalizeHeader(h: string): string {
+/** Normalise header for flexible column matching */
+function norm(h: string): string {
   return h.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-const HEADER_MAP: Record<string, string> = {
-  event: "event",
-  loadchannelname: "loadName",
-  channelkey: "channelKey",
-  referenceutilitytype: "referenceUtilityType",
-  utilitytype: "referenceUtilityType",
-  unit: "unit",
-  usage: "usage",
-};
+/** Find a column name from headers by checking normalised variants */
+function findCol(headers: string[], ...variants: string[]): string | undefined {
+  for (const v of variants) {
+    const found = headers.find((h) => norm(h) === norm(v));
+    if (found) return found;
+  }
+  // partial match fallback
+  for (const v of variants) {
+    const n = norm(v);
+    const found = headers.find((h) => norm(h).includes(n) || n.includes(norm(h)));
+    if (found) return found;
+  }
+  return undefined;
+}
 
 const BravegenComparison = ({ readings }: BravegenComparisonProps) => {
   const [bravegenData, setBravegenData] = useState<BravegenRow[]>([]);
+  const [uniqueLoads, setUniqueLoads] = useState<string[]>([]);
   const [fileName, setFileName] = useState<string | null>(null);
-  const [dateColumns, setDateColumns] = useState<string[]>([]);
-  const [selectedDateCol, setSelectedDateCol] = useState<string>("");
-  const [rawSheet, setRawSheet] = useState<any[] | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
+  /** Parse CSV or XLSX rows into BravegenRow[] */
+  const processRows = useCallback((json: any[]) => {
+    if (json.length === 0) return;
+
+    const headers = Object.keys(json[0]);
+    const eventCol = findCol(headers, "Event");
+    const loadCol = findCol(headers, "Load/Channel Name", "LoadChannelName", "Load Channel Name");
+    const keyCol = findCol(headers, "Channel Key", "ChannelKey");
+    const refCol = findCol(headers, "Reference", "Reference Utility Type");
+    const typeCol = findCol(headers, "Utility Type", "UtilityType");
+    const unitCol = findCol(headers, "Unit");
+    const usageCol = findCol(headers, "Usage");
+
+    const rows: BravegenRow[] = json.map((row) => {
+      const rawEvent = eventCol ? row[eventCol] : null;
+      const eventDate = parseDate(rawEvent);
+      const usageVal = usageCol ? row[usageCol] : null;
+
+      return {
+        event: eventDate ? formatDateTime(eventDate) : String(rawEvent ?? ""),
+        eventDate,
+        loadName: String((loadCol ? row[loadCol] : "") ?? ""),
+        channelKey: String((keyCol ? row[keyCol] : "") ?? ""),
+        reference: String((refCol ? row[refCol] : "") ?? ""),
+        utilityType: String((typeCol ? row[typeCol] : "") ?? ""),
+        unit: String((unitCol ? row[unitCol] : "") ?? ""),
+        usage: usageVal != null && usageVal !== "" ? parseFloat(String(usageVal)) : null,
+      };
+    }).filter((r) => r.loadName || r.usage != null);
+
+    setBravegenData(rows);
+    setUniqueLoads([...new Set(rows.map((r) => r.loadName).filter(Boolean))]);
+  }, []);
+
   const handleFile = useCallback((file: File) => {
-    if (!file.name.match(/\.xlsx?$/i)) {
-      toast.error("Please upload an Excel file (.xlsx or .xls)");
+    const isCSV = file.name.match(/\.csv$/i);
+    const isExcel = file.name.match(/\.xlsx?$/i);
+    if (!isCSV && !isExcel) {
+      toast.error("Please upload a .csv or .xlsx file");
       return;
     }
 
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        const data = new Uint8Array(e.target?.result as ArrayBuffer);
-        const wb = XLSX.read(data, { type: "array", cellDates: true });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const json: any[] = XLSX.utils.sheet_to_json(ws, { defval: null });
-
-        if (json.length === 0) {
-          toast.error("No data found in the spreadsheet.");
-          return;
-        }
-
-        setRawSheet(json);
-        setFileName(file.name);
-
-        // Find all column headers
-        const headers = Object.keys(json[0]);
-
-        // Identify date columns: columns that look like dates (contain "/" or are Date objects)
-        const dateCols = headers.filter((h) => {
-          // Check if the header itself looks like a date
-          const parsed = parseDate(h);
-          if (parsed && parsed.getFullYear() > 2000) return true;
-          // Check if the column name contains date-like patterns
-          if (/\d{1,2}\/\d{1,2}\/\d{2,4}/.test(h)) return true;
-          if (/\d{4}-\d{2}-\d{2}/.test(h)) return true;
-          return false;
-        });
-
-        // Also check for columns with "date" or "time" in the name
-        const namedDateCols = headers.filter((h) => {
-          const norm = normalizeHeader(h);
-          return norm.includes("date") || norm.includes("time") || norm.includes("timestamp");
-        });
-
-        const allDateCols = [...new Set([...dateCols, ...namedDateCols])];
-        setDateColumns(allDateCols);
-
-        if (allDateCols.length > 0) {
-          setSelectedDateCol(allDateCols[0]);
-          processData(json, allDateCols[0], headers);
+        if (isCSV) {
+          const text = e.target?.result as string;
+          // Remove BOM if present
+          const clean = text.replace(/^\uFEFF/, "");
+          const wb = XLSX.read(clean, { type: "string" });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          const json: any[] = XLSX.utils.sheet_to_json(ws, { defval: null });
+          processRows(json);
+          setFileName(file.name);
+          toast.success(`Loaded ${json.length} rows from ${file.name}`);
         } else {
-          // If no date columns found, try to use the data as-is
-          processData(json, "", headers);
+          const data = new Uint8Array(e.target?.result as ArrayBuffer);
+          const wb = XLSX.read(data, { type: "array", cellDates: true });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          const json: any[] = XLSX.utils.sheet_to_json(ws, { defval: null });
+          processRows(json);
+          setFileName(file.name);
+          toast.success(`Loaded ${json.length} rows from ${file.name}`);
         }
-
-        toast.success(`Loaded ${json.length} rows from ${file.name}`);
       } catch (err) {
-        console.error("Excel parse error:", err);
-        toast.error("Failed to parse Excel file.");
+        console.error("File parse error:", err);
+        toast.error("Failed to parse file.");
       }
     };
-    reader.readAsArrayBuffer(file);
-  }, []);
 
-  const processData = (json: any[], dateCol: string, headers: string[]) => {
-    // Build column map
-    const colMap: Record<string, string> = {};
-    headers.forEach((h) => {
-      const norm = normalizeHeader(h);
-      if (HEADER_MAP[norm]) {
-        colMap[HEADER_MAP[norm]] = h;
-      }
-    });
-
-    const rows: BravegenRow[] = json.map((row) => {
-      const usage = row[colMap["usage"] || "Usage"];
-      const dateVal = dateCol ? row[dateCol] || dateCol : "";
-      const parsedDate = parseDate(dateVal);
-
-      return {
-        event: parsedDate ? formatDate(parsedDate) : (dateCol || ""),
-        loadName: String(row[colMap["loadName"] || "Load/Channel Name"] || row[colMap["loadName"] || "Load/Char"] || ""),
-        channelKey: String(row[colMap["channelKey"] || "Channel Key"] || row[colMap["channelKey"] || "Channel Ke"] || ""),
-        referenceUtilityType: String(row[colMap["referenceUtilityType"] || "Reference"] || row["Reference Utility Type"] || ""),
-        unit: String(row[colMap["unit"] || "Unit"] || ""),
-        usage: usage != null ? parseFloat(String(usage)) || null : null,
-        dateTime: dateCol || "",
-      };
-    });
-
-    setBravegenData(rows);
-  };
-
-  const handleDateColChange = (col: string) => {
-    setSelectedDateCol(col);
-    if (rawSheet) {
-      processData(rawSheet, col, Object.keys(rawSheet[0]));
+    if (isCSV) {
+      reader.readAsText(file);
+    } else {
+      reader.readAsArrayBuffer(file);
     }
-  };
+  }, [processRows]);
 
-  // Compare bravegen data with extracted readings
+  /**
+   * Compare: for each extracted reading, find the BraveGen row with the
+   * closest timestamp (by load name fuzzy match). The "accuracy" is
+   * how close the BraveGen cumulative reading is to the extracted kWh.
+   */
   const comparisons = useMemo(() => {
     if (bravegenData.length === 0 || readings.length === 0) return [];
 
     return readings.map((reading) => {
-      // Find matching bravegen row by load name (fuzzy match)
-      const readingName = reading.loadName.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const rName = norm(reading.loadName);
 
-      const match = bravegenData.find((bg) => {
-        const bgName = bg.loadName.toLowerCase().replace(/[^a-z0-9]/g, "");
-        return bgName.includes(readingName) || readingName.includes(bgName);
+      // Find all BraveGen rows for this load (fuzzy name match)
+      const candidates = bravegenData.filter((bg) => {
+        const bgN = norm(bg.loadName);
+        return bgN.includes(rName) || rName.includes(bgN);
       });
 
-      if (!match || match.usage == null || reading.physicalMeterRead == null) {
+      if (candidates.length === 0 || reading.physicalMeterRead == null) {
         return {
           loadName: reading.loadName,
           extractedReading: reading.physicalMeterRead,
           extractedDateTime: reading.dateTime,
-          bravegenReading: match?.usage ?? null,
-          bravegenDateTime: match?.event ?? null,
+          bravegenReading: null,
+          bravegenDateTime: null,
           accuracy: null,
           matched: false,
         };
       }
 
-      // Calculate accuracy as percentage difference
+      // Parse the extracted reading's datetime
+      const extractedDate = parseDate(reading.dateTime);
+
+      // Find the BraveGen row closest in time
+      let bestMatch = candidates[0];
+      if (extractedDate && candidates.some((c) => c.eventDate)) {
+        let bestDiff = Infinity;
+        for (const c of candidates) {
+          if (!c.eventDate) continue;
+          const diff = Math.abs(c.eventDate.getTime() - extractedDate.getTime());
+          if (diff < bestDiff) {
+            bestDiff = diff;
+            bestMatch = c;
+          }
+        }
+      }
+
+      if (bestMatch.usage == null) {
+        return {
+          loadName: reading.loadName,
+          extractedReading: reading.physicalMeterRead,
+          extractedDateTime: reading.dateTime,
+          bravegenReading: null,
+          bravegenDateTime: bestMatch.event,
+          accuracy: null,
+          matched: true,
+        };
+      }
+
+      // Accuracy: how close the BraveGen cumulative kWh is to extracted
       const accuracy = reading.physicalMeterRead !== 0
-        ? (match.usage / reading.physicalMeterRead) * 100
+        ? (bestMatch.usage / reading.physicalMeterRead) * 100
         : null;
 
       return {
         loadName: reading.loadName,
         extractedReading: reading.physicalMeterRead,
         extractedDateTime: reading.dateTime,
-        bravegenReading: match.usage,
-        bravegenDateTime: match.event,
+        bravegenReading: bestMatch.usage,
+        bravegenDateTime: bestMatch.event,
         accuracy,
         matched: true,
       };
@@ -257,10 +270,8 @@ const BravegenComparison = ({ readings }: BravegenComparisonProps) => {
 
   const clearData = () => {
     setBravegenData([]);
+    setUniqueLoads([]);
     setFileName(null);
-    setDateColumns([]);
-    setSelectedDateCol("");
-    setRawSheet(null);
   };
 
   return (
@@ -273,7 +284,7 @@ const BravegenComparison = ({ readings }: BravegenComparisonProps) => {
             BraveGen Data Comparison
           </h3>
           <p className="text-xs text-muted-foreground mt-1">
-            Upload a BraveGen export Excel file to compare readings with extracted data.
+            Upload a BraveGen CSV or Excel export to compare readings with extracted data.
           </p>
         </div>
         {fileName && (
@@ -297,44 +308,29 @@ const BravegenComparison = ({ readings }: BravegenComparisonProps) => {
         >
           <Upload className="h-8 w-8 mx-auto text-muted-foreground mb-3" />
           <p className="text-sm text-muted-foreground mb-1">
-            Drop a BraveGen Excel export here, or click to browse
+            Drop a BraveGen export here, or click to browse
           </p>
-          <p className="text-xs text-muted-foreground/70">.xlsx or .xls files</p>
+          <p className="text-xs text-muted-foreground/70">.csv, .xlsx, or .xls files</p>
           <input
             id="bravegen-file-input"
             type="file"
-            accept=".xlsx,.xls"
+            accept=".csv,.xlsx,.xls"
             className="hidden"
             onChange={handleFileInput}
           />
         </div>
       ) : (
         <div className="px-5 py-3 space-y-3">
-          {/* File info & date selector */}
+          {/* File info */}
           <div className="flex items-center gap-4 flex-wrap">
             <div className="flex items-center gap-2">
               <FileSpreadsheet className="h-4 w-4 text-primary" />
               <span className="text-sm font-mono text-foreground">{fileName}</span>
               <Badge variant="secondary" className="text-xs">{bravegenData.length} rows</Badge>
+              {uniqueLoads.length > 0 && (
+                <Badge variant="outline" className="text-xs">{uniqueLoads.length} loads</Badge>
+              )}
             </div>
-
-            {dateColumns.length > 0 && (
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground whitespace-nowrap">Date/Time Column:</span>
-                <Select value={selectedDateCol} onValueChange={handleDateColChange}>
-                  <SelectTrigger className="h-8 w-52 bg-card border-border font-mono text-xs">
-                    <SelectValue placeholder="Select date column" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {dateColumns.map((col) => (
-                      <SelectItem key={col} value={col} className="font-mono text-xs">
-                        {col}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
           </div>
 
           {/* Bravegen data preview */}
@@ -345,9 +341,10 @@ const BravegenComparison = ({ readings }: BravegenComparisonProps) => {
                   <TableRow className="bg-secondary/60 hover:bg-secondary/60">
                     <TableHead className="text-xs font-semibold">Event Time</TableHead>
                     <TableHead className="text-xs font-semibold">Load/Channel</TableHead>
+                    <TableHead className="text-xs font-semibold">Channel Key</TableHead>
                     <TableHead className="text-xs font-semibold">Utility Type</TableHead>
                     <TableHead className="text-xs font-semibold">Unit</TableHead>
-                    <TableHead className="text-xs font-semibold text-right">Usage</TableHead>
+                    <TableHead className="text-xs font-semibold text-right">Usage (kWh)</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -355,7 +352,8 @@ const BravegenComparison = ({ readings }: BravegenComparisonProps) => {
                     <TableRow key={i} className="hover:bg-surface-elevated">
                       <TableCell className="font-mono text-xs">{row.event}</TableCell>
                       <TableCell className="text-xs">{row.loadName}</TableCell>
-                      <TableCell className="text-xs">{row.referenceUtilityType}</TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">{row.channelKey}</TableCell>
+                      <TableCell className="text-xs">{row.utilityType}</TableCell>
                       <TableCell className="text-xs">{row.unit}</TableCell>
                       <TableCell className="font-mono text-xs text-right">{row.usage?.toLocaleString() ?? "—"}</TableCell>
                     </TableRow>
@@ -369,7 +367,7 @@ const BravegenComparison = ({ readings }: BravegenComparisonProps) => {
           {comparisons.length > 0 && (
             <div className="space-y-2">
               <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                Comparison Results
+                Comparison Results — Nearest Time Match
               </h4>
               <div className="rounded-md border border-border overflow-x-auto">
                 <Table>
