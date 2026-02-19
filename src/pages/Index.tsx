@@ -8,6 +8,7 @@ import DataPreviewTable from "@/components/DataPreviewTable";
 import ExportSettingsPanel from "@/components/ExportSettingsPanel";
 import DocumentPreview from "@/components/DocumentPreview";
 import MeterValidationSheet from "@/components/MeterValidationSheet";
+import BravegenComparison from "@/components/BravegenComparison";
 import { MeterReading, ExportSettings } from "@/types/meter";
 import { generateValidationExcel } from "@/lib/excelGenerator";
 import { supabase } from "@/integrations/supabase/client";
@@ -208,6 +209,14 @@ const Index = () => {
             Meter Read Validation
           </h2>
           <MeterValidationSheet readings={readings} />
+        </div>
+
+        {/* BraveGen Comparison */}
+        <div className="space-y-2">
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+            BraveGen Data Comparison
+          </h2>
+          <BravegenComparison readings={readings} />
         </div>
 
         {/* Actions */}
