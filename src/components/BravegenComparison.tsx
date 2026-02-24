@@ -209,7 +209,18 @@ const BravegenComparison = ({ readings }: BravegenComparisonProps) => {
     return (2 * overlap) / (bg1.size + bg2.size);
   };
 
-  /** Auto-match: for each extracted reading, find the best BraveGen row by name similarity + nearest time */
+  /** Round a date down to the nearest 15-min interval */
+  const roundTo15Min = (d: Date): Date => {
+    const ms = d.getTime();
+    const mins = d.getMinutes();
+    const rounded = mins - (mins % 15);
+    const out = new Date(ms);
+    out.setMinutes(rounded, 0, 0);
+    return out;
+  };
+
+  /** Auto-match: for each extracted reading, find the BraveGen row with best name match,
+   *  then pick the one whose time is nearest (rounded to 15-min intervals). */
   const handleAutoMatch = () => {
     if (readings.length === 0 || bravegenData.length === 0) {
       toast.error("Need both extracted data and BraveGen data to auto-match.");
@@ -218,27 +229,50 @@ const BravegenComparison = ({ readings }: BravegenComparisonProps) => {
 
     const newRows: ComparisonRow[] = readings.map((reading) => {
       const readingDate = reading.dateTime ? parseDate(reading.dateTime) : null;
+      // Round the extracted reading time down to the nearest 15-min BraveGen interval
+      const readingRounded = readingDate ? roundTo15Min(readingDate) : null;
 
-      let bestKey = "";
-      let bestScore = -1;
-
+      // Step 1: Find all BraveGen rows with good name similarity
+      const candidates: { bg: BravegenRow; idx: number; nameSim: number }[] = [];
       bravegenData.forEach((bg, i) => {
         const nameSim = similarity(reading.loadName, bg.loadName);
-        if (nameSim < 0.3) return;
-
-        let timeScore = 0.5;
-        if (readingDate && bg.eventDate) {
-          const diffMs = Math.abs(readingDate.getTime() - bg.eventDate.getTime());
-          const diffHrs = diffMs / 3600000;
-          timeScore = Math.max(0, 1 - diffHrs / 24);
-        }
-
-        const score = nameSim * 0.6 + timeScore * 0.4;
-        if (score > bestScore) {
-          bestScore = score;
-          bestKey = bgKey(bg, i);
-        }
+        if (nameSim >= 0.3) candidates.push({ bg, idx: i, nameSim });
       });
+
+      if (candidates.length === 0) {
+        return {
+          id: crypto.randomUUID(),
+          bravegenKey: "",
+          extractedId: reading.id,
+          calculated: false,
+          accuracy: null,
+          bravegenUsage: null,
+          extractedReading: null,
+        };
+      }
+
+      // Step 2: Among name-matched candidates, find the one with the closest time
+      // to the extracted reading's rounded-down 15-min interval
+      let bestKey = "";
+      let bestTimeDiff = Infinity;
+      let bestNameSim = -1;
+
+      for (const c of candidates) {
+        if (readingRounded && c.bg.eventDate) {
+          const diff = Math.abs(readingRounded.getTime() - c.bg.eventDate.getTime());
+          // Prefer better name match first, then closest time
+          if (c.nameSim > bestNameSim || (c.nameSim === bestNameSim && diff < bestTimeDiff)) {
+            bestTimeDiff = diff;
+            bestNameSim = c.nameSim;
+            bestKey = bgKey(c.bg, c.idx);
+          }
+        } else if (c.nameSim > bestNameSim) {
+          // No time info, just use name similarity
+          bestNameSim = c.nameSim;
+          bestKey = bgKey(c.bg, c.idx);
+          bestTimeDiff = Infinity;
+        }
+      }
 
       return {
         id: crypto.randomUUID(),
