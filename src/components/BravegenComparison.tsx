@@ -1,9 +1,10 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback } from "react";
 import { toast } from "sonner";
-import { Upload, FileSpreadsheet, ArrowRightLeft, X } from "lucide-react";
+import { Upload, FileSpreadsheet, ArrowRightLeft, X, Plus, Trash2, Calculator } from "lucide-react";
 import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -32,29 +33,30 @@ interface BravegenRow {
   usage: number | null;
 }
 
+interface ComparisonRow {
+  id: string;
+  bravegenKey: string; // "loadName||eventISO" unique key
+  extractedId: string; // reading.id from extracted data
+  calculated: boolean;
+  accuracy: number | null;
+  bravegenUsage: number | null;
+  extractedReading: number | null;
+}
+
 interface BravegenComparisonProps {
   readings: MeterReading[];
 }
 
-/**
- * Parse dates like "20/02/2026 00:15:00" (dd/MM/yyyy HH:mm:ss)
- * or ISO or Excel serial numbers.
- */
 function parseDate(val: any): Date | null {
   if (val == null || val === "") return null;
-  // Excel serial number
   if (typeof val === "number") {
     const epoch = new Date(1899, 11, 30);
     return new Date(epoch.getTime() + val * 86400000);
   }
   if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
   const s = String(val).trim();
-  // dd/MM/yyyy HH:mm:ss
   const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
-  if (m) {
-    return new Date(+m[3], +m[2] - 1, +m[1], +m[4], +m[5], +(m[6] || 0));
-  }
-  // yyyy-MM-dd or ISO
+  if (m) return new Date(+m[3], +m[2] - 1, +m[1], +m[4], +m[5], +(m[6] || 0));
   const d = new Date(s);
   return isNaN(d.getTime()) ? null : d;
 }
@@ -66,18 +68,15 @@ function formatDateTime(d: Date): string {
   });
 }
 
-/** Normalise header for flexible column matching */
 function norm(h: string): string {
   return h.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-/** Find a column name from headers by checking normalised variants */
 function findCol(headers: string[], ...variants: string[]): string | undefined {
   for (const v of variants) {
     const found = headers.find((h) => norm(h) === norm(v));
     if (found) return found;
   }
-  // partial match fallback
   for (const v of variants) {
     const n = norm(v);
     const found = headers.find((h) => norm(h).includes(n) || n.includes(norm(h)));
@@ -86,16 +85,19 @@ function findCol(headers: string[], ...variants: string[]): string | undefined {
   return undefined;
 }
 
+/** Build a unique key for a BraveGen row */
+function bgKey(row: BravegenRow, idx: number): string {
+  return `${row.loadName}||${row.eventDate?.toISOString() ?? idx}`;
+}
+
 const BravegenComparison = ({ readings }: BravegenComparisonProps) => {
   const [bravegenData, setBravegenData] = useState<BravegenRow[]>([]);
-  const [uniqueLoads, setUniqueLoads] = useState<string[]>([]);
   const [fileName, setFileName] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [comparisonRows, setComparisonRows] = useState<ComparisonRow[]>([]);
 
-  /** Parse CSV or XLSX rows into BravegenRow[] */
   const processRows = useCallback((json: any[]) => {
     if (json.length === 0) return;
-
     const headers = Object.keys(json[0]);
     const eventCol = findCol(headers, "Event");
     const loadCol = findCol(headers, "Load/Channel Name", "LoadChannelName", "Load Channel Name");
@@ -109,7 +111,6 @@ const BravegenComparison = ({ readings }: BravegenComparisonProps) => {
       const rawEvent = eventCol ? row[eventCol] : null;
       const eventDate = parseDate(rawEvent);
       const usageVal = usageCol ? row[usageCol] : null;
-
       return {
         event: eventDate ? formatDateTime(eventDate) : String(rawEvent ?? ""),
         eventDate,
@@ -123,7 +124,7 @@ const BravegenComparison = ({ readings }: BravegenComparisonProps) => {
     }).filter((r) => r.loadName || r.usage != null);
 
     setBravegenData(rows);
-    setUniqueLoads([...new Set(rows.map((r) => r.loadName).filter(Boolean))]);
+    setComparisonRows([]);
   }, []);
 
   const handleFile = useCallback((file: File) => {
@@ -133,134 +134,87 @@ const BravegenComparison = ({ readings }: BravegenComparisonProps) => {
       toast.error("Please upload a .csv or .xlsx file");
       return;
     }
-
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        if (isCSV) {
-          const text = e.target?.result as string;
-          // Remove BOM if present
-          const clean = text.replace(/^\uFEFF/, "");
-          const wb = XLSX.read(clean, { type: "string" });
-          const ws = wb.Sheets[wb.SheetNames[0]];
-          const json: any[] = XLSX.utils.sheet_to_json(ws, { defval: null });
-          processRows(json);
-          setFileName(file.name);
-          toast.success(`Loaded ${json.length} rows from ${file.name}`);
-        } else {
-          const data = new Uint8Array(e.target?.result as ArrayBuffer);
-          const wb = XLSX.read(data, { type: "array", cellDates: true });
-          const ws = wb.Sheets[wb.SheetNames[0]];
-          const json: any[] = XLSX.utils.sheet_to_json(ws, { defval: null });
-          processRows(json);
-          setFileName(file.name);
-          toast.success(`Loaded ${json.length} rows from ${file.name}`);
-        }
-      } catch (err) {
-        console.error("File parse error:", err);
+        const wb = isCSV
+          ? XLSX.read((e.target?.result as string).replace(/^\uFEFF/, ""), { type: "string" })
+          : XLSX.read(new Uint8Array(e.target?.result as ArrayBuffer), { type: "array", cellDates: true });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const json: any[] = XLSX.utils.sheet_to_json(ws, { defval: null });
+        processRows(json);
+        setFileName(file.name);
+        toast.success(`Loaded ${json.length} rows from ${file.name}`);
+      } catch {
         toast.error("Failed to parse file.");
       }
     };
-
-    if (isCSV) {
-      reader.readAsText(file);
-    } else {
-      reader.readAsArrayBuffer(file);
-    }
+    isCSV ? reader.readAsText(file) : reader.readAsArrayBuffer(file);
   }, [processRows]);
 
-  /**
-   * Compare: for each extracted reading, find the BraveGen row with the
-   * closest timestamp (by load name fuzzy match). The "accuracy" is
-   * how close the BraveGen cumulative reading is to the extracted kWh.
-   */
-  const comparisons = useMemo(() => {
-    if (bravegenData.length === 0 || readings.length === 0) return [];
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) handleFile(file);
+  }, [handleFile]);
 
-    return readings.map((reading) => {
-      const rName = norm(reading.loadName);
+  const handleFileInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) handleFile(file);
+  }, [handleFile]);
 
-      // Find all BraveGen rows for this load (fuzzy name match)
-      const candidates = bravegenData.filter((bg) => {
-        const bgN = norm(bg.loadName);
-        return bgN.includes(rName) || rName.includes(bgN);
-      });
+  // Comparison row management
+  const addComparisonRow = () => {
+    setComparisonRows((prev) => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        bravegenKey: "",
+        extractedId: "",
+        calculated: false,
+        accuracy: null,
+        bravegenUsage: null,
+        extractedReading: null,
+      },
+    ]);
+  };
 
-      if (candidates.length === 0 || reading.physicalMeterRead == null) {
-        return {
-          loadName: reading.loadName,
-          extractedReading: reading.physicalMeterRead,
-          extractedDateTime: reading.dateTime,
-          bravegenReading: null,
-          bravegenDateTime: null,
-          accuracy: null,
-          matched: false,
-        };
-      }
+  const removeComparisonRow = (id: string) => {
+    setComparisonRows((prev) => prev.filter((r) => r.id !== id));
+  };
 
-      // Parse the extracted reading's datetime
-      const extractedDate = parseDate(reading.dateTime);
+  const updateComparisonRow = (id: string, field: "bravegenKey" | "extractedId", value: string) => {
+    setComparisonRows((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, [field]: value, calculated: false, accuracy: null } : r))
+    );
+  };
 
-      // Find the BraveGen row closest in time
-      let bestMatch = candidates[0];
-      if (extractedDate && candidates.some((c) => c.eventDate)) {
-        let bestDiff = Infinity;
-        for (const c of candidates) {
-          if (!c.eventDate) continue;
-          const diff = Math.abs(c.eventDate.getTime() - extractedDate.getTime());
-          if (diff < bestDiff) {
-            bestDiff = diff;
-            bestMatch = c;
-          }
+  const handleCalculateAll = () => {
+    setComparisonRows((prev) =>
+      prev.map((row) => {
+        const bgIdx = bravegenData.findIndex((bg, i) => bgKey(bg, i) === row.bravegenKey);
+        const bg = bgIdx >= 0 ? bravegenData[bgIdx] : null;
+        const extracted = readings.find((r) => r.id === row.extractedId);
+
+        if (!bg || !extracted || bg.usage == null || extracted.physicalMeterRead == null) {
+          return { ...row, calculated: true, accuracy: null, bravegenUsage: bg?.usage ?? null, extractedReading: extracted?.physicalMeterRead ?? null };
         }
-      }
 
-      if (bestMatch.usage == null) {
+        const accuracy = extracted.physicalMeterRead !== 0
+          ? (bg.usage / extracted.physicalMeterRead) * 100
+          : null;
+
         return {
-          loadName: reading.loadName,
-          extractedReading: reading.physicalMeterRead,
-          extractedDateTime: reading.dateTime,
-          bravegenReading: null,
-          bravegenDateTime: bestMatch.event,
-          accuracy: null,
-          matched: true,
+          ...row,
+          calculated: true,
+          accuracy,
+          bravegenUsage: bg.usage,
+          extractedReading: extracted.physicalMeterRead,
         };
-      }
-
-      // Accuracy: how close the BraveGen cumulative kWh is to extracted
-      const accuracy = reading.physicalMeterRead !== 0
-        ? (bestMatch.usage / reading.physicalMeterRead) * 100
-        : null;
-
-      return {
-        loadName: reading.loadName,
-        extractedReading: reading.physicalMeterRead,
-        extractedDateTime: reading.dateTime,
-        bravegenReading: bestMatch.usage,
-        bravegenDateTime: bestMatch.event,
-        accuracy,
-        matched: true,
-      };
-    });
-  }, [bravegenData, readings]);
-
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      setIsDragging(false);
-      const file = e.dataTransfer.files?.[0];
-      if (file) handleFile(file);
-    },
-    [handleFile]
-  );
-
-  const handleFileInput = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (file) handleFile(file);
-    },
-    [handleFile]
-  );
+      })
+    );
+  };
 
   const getAccuracyColor = (val: number) => {
     if (val >= 95 && val <= 105) return "bg-green-600/20 text-green-400 border-green-600/40";
@@ -270,9 +224,23 @@ const BravegenComparison = ({ readings }: BravegenComparisonProps) => {
 
   const clearData = () => {
     setBravegenData([]);
-    setUniqueLoads([]);
     setFileName(null);
+    setComparisonRows([]);
   };
+
+  // Build BraveGen dropdown options
+  const bravegenOptions = bravegenData.map((row, i) => ({
+    key: bgKey(row, i),
+    label: `${row.loadName} — ${row.event} — ${row.usage?.toLocaleString() ?? "?"} kWh`,
+  }));
+
+  // Build extracted data dropdown options
+  const extractedOptions = readings.map((r) => ({
+    key: r.id,
+    label: `${r.loadName}${r.physicalMeterRead != null ? ` — ${r.physicalMeterRead} kWh` : ""}${r.dateTime ? ` (${r.dateTime})` : ""}`,
+  }));
+
+  const anyCalculated = comparisonRows.some((r) => r.calculated);
 
   return (
     <div className="rounded-lg border border-border bg-surface overflow-hidden">
@@ -284,7 +252,7 @@ const BravegenComparison = ({ readings }: BravegenComparisonProps) => {
             BraveGen Data Comparison
           </h3>
           <p className="text-xs text-muted-foreground mt-1">
-            Upload a BraveGen CSV or Excel export to compare readings with extracted data.
+            Upload a BraveGen export, then map rows to extracted data for accuracy comparison.
           </p>
         </div>
         {fileName && (
@@ -295,7 +263,7 @@ const BravegenComparison = ({ readings }: BravegenComparisonProps) => {
         )}
       </div>
 
-      {/* Upload area or loaded file info */}
+      {/* Upload area */}
       {!fileName ? (
         <div
           className={`m-4 rounded-lg border-2 border-dashed p-8 text-center transition-colors cursor-pointer ${
@@ -307,125 +275,174 @@ const BravegenComparison = ({ readings }: BravegenComparisonProps) => {
           onClick={() => document.getElementById("bravegen-file-input")?.click()}
         >
           <Upload className="h-8 w-8 mx-auto text-muted-foreground mb-3" />
-          <p className="text-sm text-muted-foreground mb-1">
-            Drop a BraveGen export here, or click to browse
-          </p>
+          <p className="text-sm text-muted-foreground mb-1">Drop a BraveGen export here, or click to browse</p>
           <p className="text-xs text-muted-foreground/70">.csv, .xlsx, or .xls files</p>
-          <input
-            id="bravegen-file-input"
-            type="file"
-            accept=".csv,.xlsx,.xls"
-            className="hidden"
-            onChange={handleFileInput}
-          />
+          <input id="bravegen-file-input" type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleFileInput} />
         </div>
       ) : (
-        <div className="px-5 py-3 space-y-3">
+        <div className="px-5 py-3 space-y-4">
           {/* File info */}
           <div className="flex items-center gap-4 flex-wrap">
             <div className="flex items-center gap-2">
               <FileSpreadsheet className="h-4 w-4 text-primary" />
               <span className="text-sm font-mono text-foreground">{fileName}</span>
               <Badge variant="secondary" className="text-xs">{bravegenData.length} rows</Badge>
-              {uniqueLoads.length > 0 && (
-                <Badge variant="outline" className="text-xs">{uniqueLoads.length} loads</Badge>
-              )}
             </div>
           </div>
 
-          {/* Bravegen data preview */}
+          {/* BraveGen data preview (collapsed) */}
           {bravegenData.length > 0 && (
-            <div className="rounded-md border border-border overflow-x-auto max-h-48 overflow-y-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-secondary/60 hover:bg-secondary/60">
-                    <TableHead className="text-xs font-semibold">Event Time</TableHead>
-                    <TableHead className="text-xs font-semibold">Load/Channel</TableHead>
-                    <TableHead className="text-xs font-semibold">Channel Key</TableHead>
-                    <TableHead className="text-xs font-semibold">Utility Type</TableHead>
-                    <TableHead className="text-xs font-semibold">Unit</TableHead>
-                    <TableHead className="text-xs font-semibold text-right">Usage (kWh)</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {bravegenData.map((row, i) => (
-                    <TableRow key={i} className="hover:bg-surface-elevated">
-                      <TableCell className="font-mono text-xs">{row.event}</TableCell>
-                      <TableCell className="text-xs">{row.loadName}</TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">{row.channelKey}</TableCell>
-                      <TableCell className="text-xs">{row.utilityType}</TableCell>
-                      <TableCell className="text-xs">{row.unit}</TableCell>
-                      <TableCell className="font-mono text-xs text-right">{row.usage?.toLocaleString() ?? "—"}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-
-          {/* Comparison results */}
-          {comparisons.length > 0 && (
-            <div className="space-y-2">
-              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                Comparison Results — Nearest Time Match
-              </h4>
-              <div className="rounded-md border border-border overflow-x-auto">
+            <details className="group">
+              <summary className="text-xs font-semibold text-muted-foreground uppercase tracking-wider cursor-pointer hover:text-foreground transition-colors">
+                BraveGen Data Preview ({bravegenData.length} rows)
+              </summary>
+              <div className="mt-2 rounded-md border border-border overflow-x-auto max-h-48 overflow-y-auto">
                 <Table>
                   <TableHeader>
                     <TableRow className="bg-secondary/60 hover:bg-secondary/60">
-                      <TableHead className="text-xs font-semibold">Load Name</TableHead>
-                      <TableHead className="text-xs font-semibold text-right">Extracted kWh</TableHead>
-                      <TableHead className="text-xs font-semibold">Extracted Time</TableHead>
-                      <TableHead className="text-xs font-semibold text-right">BraveGen kWh</TableHead>
-                      <TableHead className="text-xs font-semibold">BraveGen Time</TableHead>
-                      <TableHead className="text-xs font-semibold text-center">Accuracy</TableHead>
-                      <TableHead className="text-xs font-semibold text-center">Status</TableHead>
+                      <TableHead className="text-xs font-semibold">Event Time</TableHead>
+                      <TableHead className="text-xs font-semibold">Load/Channel</TableHead>
+                      <TableHead className="text-xs font-semibold">Unit</TableHead>
+                      <TableHead className="text-xs font-semibold text-right">Usage (kWh)</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {comparisons.map((comp, i) => (
+                    {bravegenData.map((row, i) => (
                       <TableRow key={i} className="hover:bg-surface-elevated">
-                        <TableCell className="text-sm font-medium">{comp.loadName}</TableCell>
-                        <TableCell className="font-mono text-sm text-right">
-                          {comp.extractedReading?.toLocaleString() ?? "—"}
-                        </TableCell>
-                        <TableCell className="font-mono text-xs text-muted-foreground">
-                          {comp.extractedDateTime ?? "—"}
-                        </TableCell>
-                        <TableCell className="font-mono text-sm text-right">
-                          {comp.bravegenReading?.toLocaleString() ?? "—"}
-                        </TableCell>
-                        <TableCell className="font-mono text-xs text-muted-foreground">
-                          {comp.bravegenDateTime ?? "—"}
-                        </TableCell>
-                        <TableCell className="text-center">
-                          {comp.accuracy != null ? (
-                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-mono font-bold border ${getAccuracyColor(comp.accuracy)}`}>
-                              {comp.accuracy.toFixed(1)}%
-                            </span>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-center">
-                          {comp.accuracy != null ? (
-                            <Badge
-                              variant={comp.accuracy >= 95 && comp.accuracy <= 105 ? "default" : "destructive"}
-                              className={comp.accuracy >= 95 && comp.accuracy <= 105 ? "bg-green-600 hover:bg-green-700" : ""}
-                            >
-                              {comp.accuracy >= 95 && comp.accuracy <= 105 ? "PASS" : "FAIL"}
-                            </Badge>
-                          ) : (
-                            <Badge variant="secondary" className="text-xs">No Match</Badge>
-                          )}
-                        </TableCell>
+                        <TableCell className="font-mono text-xs">{row.event}</TableCell>
+                        <TableCell className="text-xs">{row.loadName}</TableCell>
+                        <TableCell className="text-xs">{row.unit}</TableCell>
+                        <TableCell className="font-mono text-xs text-right">{row.usage?.toLocaleString() ?? "—"}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
               </div>
-            </div>
+            </details>
           )}
+
+          {/* Comparison mapping table */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Comparison Mapping
+                {comparisonRows.length > 0 && (
+                  <span className="ml-2 inline-flex items-center rounded-full bg-primary/20 px-2.5 py-0.5 text-xs font-medium text-primary">
+                    {comparisonRows.length} rows
+                  </span>
+                )}
+              </h4>
+              <Button variant="outline" size="sm" onClick={addComparisonRow} className="gap-1.5">
+                <Plus className="h-3.5 w-3.5" />
+                Add Row
+              </Button>
+            </div>
+
+            {comparisonRows.length === 0 ? (
+              <div className="rounded-md border border-dashed border-border p-6 text-center">
+                <p className="text-sm text-muted-foreground">
+                  Click "Add Row" to start mapping BraveGen readings to extracted data.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-secondary/60">
+                      <th className="px-3 py-2.5 text-left font-semibold text-muted-foreground text-xs uppercase tracking-wider w-8">#</th>
+                      <th className="px-3 py-2.5 text-left font-semibold text-muted-foreground text-xs uppercase tracking-wider">BraveGen Reading (Date/Load/kWh)</th>
+                      <th className="px-3 py-2.5 text-left font-semibold text-muted-foreground text-xs uppercase tracking-wider">Extracted Data (Load/kWh)</th>
+                      {anyCalculated && (
+                        <>
+                          <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground text-xs uppercase tracking-wider">Accuracy</th>
+                          <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground text-xs uppercase tracking-wider">Status</th>
+                        </>
+                      )}
+                      <th className="px-3 py-2.5 w-10"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {comparisonRows.map((row, i) => (
+                      <tr key={row.id} className="hover:bg-surface-elevated">
+                        <td className="px-3 py-2 text-muted-foreground font-mono text-xs">{i + 1}</td>
+                        <td className="px-3 py-2">
+                          <Select value={row.bravegenKey} onValueChange={(v) => updateComparisonRow(row.id, "bravegenKey", v)}>
+                            <SelectTrigger className="h-8 w-full bg-card border-border text-xs">
+                              <SelectValue placeholder="Select BraveGen reading..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {bravegenOptions.map((opt) => (
+                                <SelectItem key={opt.key} value={opt.key} className="text-xs">
+                                  {opt.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </td>
+                        <td className="px-3 py-2">
+                          <Select value={row.extractedId} onValueChange={(v) => updateComparisonRow(row.id, "extractedId", v)}>
+                            <SelectTrigger className="h-8 w-full bg-card border-border text-xs">
+                              <SelectValue placeholder="Select extracted reading..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {extractedOptions.map((opt) => (
+                                <SelectItem key={opt.key} value={opt.key} className="text-xs">
+                                  {opt.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </td>
+                        {anyCalculated && (
+                          <>
+                            <td className="px-3 py-2 text-center">
+                              {row.calculated && row.accuracy != null ? (
+                                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-mono font-bold border ${getAccuracyColor(row.accuracy)}`}>
+                                  {row.accuracy.toFixed(1)}%
+                                </span>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">—</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-center">
+                              {row.calculated && row.accuracy != null ? (
+                                <Badge
+                                  variant={row.accuracy >= 95 && row.accuracy <= 105 ? "default" : "destructive"}
+                                  className={row.accuracy >= 95 && row.accuracy <= 105 ? "bg-green-600 hover:bg-green-700" : ""}
+                                >
+                                  {row.accuracy >= 95 && row.accuracy <= 105 ? "PASS" : "FAIL"}
+                                </Badge>
+                              ) : (
+                                <Badge variant="secondary" className="text-xs">—</Badge>
+                              )}
+                            </td>
+                          </>
+                        )}
+                        <td className="px-3 py-2">
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => removeComparisonRow(row.id)}>
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Calculate button */}
+            {comparisonRows.length > 0 && (
+              <div className="flex items-center justify-between border-t border-border pt-3">
+                <p className="text-xs text-muted-foreground">
+                  Accuracy = (BraveGen kWh ÷ Extracted kWh) × 100
+                </p>
+                <Button onClick={handleCalculateAll} size="sm" className={`gap-2 ${!anyCalculated ? "animate-pulse" : ""}`}>
+                  <Calculator className="h-3.5 w-3.5" />
+                  {anyCalculated ? "Recalculate" : "Calculate Accuracy"}
+                </Button>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
