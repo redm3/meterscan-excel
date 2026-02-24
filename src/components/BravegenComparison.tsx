@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { toast } from "sonner";
-import { Upload, FileSpreadsheet, ArrowRightLeft, X, Plus, Trash2, Calculator } from "lucide-react";
+import { Upload, FileSpreadsheet, ArrowRightLeft, X, Plus, Trash2, Calculator, Wand2 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -190,6 +190,71 @@ const BravegenComparison = ({ readings }: BravegenComparisonProps) => {
     );
   };
 
+  /** Fuzzy similarity score between two strings (0-1) */
+  const similarity = (a: string, b: string): number => {
+    const na = norm(a);
+    const nb = norm(b);
+    if (na === nb) return 1;
+    if (na.includes(nb) || nb.includes(na)) return 0.8;
+    const bigrams = (s: string) => {
+      const set = new Set<string>();
+      for (let i = 0; i < s.length - 1; i++) set.add(s.slice(i, i + 2));
+      return set;
+    };
+    const bg1 = bigrams(na);
+    const bg2 = bigrams(nb);
+    if (bg1.size === 0 || bg2.size === 0) return 0;
+    let overlap = 0;
+    bg1.forEach((b) => { if (bg2.has(b)) overlap++; });
+    return (2 * overlap) / (bg1.size + bg2.size);
+  };
+
+  /** Auto-match: for each extracted reading, find the best BraveGen row by name similarity + nearest time */
+  const handleAutoMatch = () => {
+    if (readings.length === 0 || bravegenData.length === 0) {
+      toast.error("Need both extracted data and BraveGen data to auto-match.");
+      return;
+    }
+
+    const newRows: ComparisonRow[] = readings.map((reading) => {
+      const readingDate = reading.dateTime ? parseDate(reading.dateTime) : null;
+
+      let bestKey = "";
+      let bestScore = -1;
+
+      bravegenData.forEach((bg, i) => {
+        const nameSim = similarity(reading.loadName, bg.loadName);
+        if (nameSim < 0.3) return;
+
+        let timeScore = 0.5;
+        if (readingDate && bg.eventDate) {
+          const diffMs = Math.abs(readingDate.getTime() - bg.eventDate.getTime());
+          const diffHrs = diffMs / 3600000;
+          timeScore = Math.max(0, 1 - diffHrs / 24);
+        }
+
+        const score = nameSim * 0.6 + timeScore * 0.4;
+        if (score > bestScore) {
+          bestScore = score;
+          bestKey = bgKey(bg, i);
+        }
+      });
+
+      return {
+        id: crypto.randomUUID(),
+        bravegenKey: bestKey,
+        extractedId: reading.id,
+        calculated: false,
+        accuracy: null,
+        bravegenUsage: null,
+        extractedReading: null,
+      };
+    });
+
+    setComparisonRows(newRows);
+    toast.success(`Auto-matched ${newRows.filter((r) => r.bravegenKey).length} of ${readings.length} readings`);
+  };
+
   const handleCalculateAll = () => {
     setComparisonRows((prev) =>
       prev.map((row) => {
@@ -332,10 +397,22 @@ const BravegenComparison = ({ readings }: BravegenComparisonProps) => {
                   </span>
                 )}
               </h4>
-              <Button variant="outline" size="sm" onClick={addComparisonRow} className="gap-1.5">
-                <Plus className="h-3.5 w-3.5" />
-                Add Row
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAutoMatch}
+                  disabled={readings.length === 0 || bravegenData.length === 0}
+                  className="gap-1.5"
+                >
+                  <Wand2 className="h-3.5 w-3.5" />
+                  Auto-Match
+                </Button>
+                <Button variant="outline" size="sm" onClick={addComparisonRow} className="gap-1.5">
+                  <Plus className="h-3.5 w-3.5" />
+                  Add Row
+                </Button>
+              </div>
             </div>
 
             {comparisonRows.length === 0 ? (
