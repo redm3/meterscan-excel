@@ -21,13 +21,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ChevronDown, HelpCircle, Printer, LinkIcon, Calculator } from "lucide-react";
-import { MeterReading } from "@/types/meter";
+import { MeterReading, ValidationExportData } from "@/types/meter";
 
 interface MeterValidationSheetProps {
   readings: MeterReading[];
+  onDataChange?: (data: ValidationExportData | null) => void;
 }
 
-const MeterValidationSheet = ({ readings }: MeterValidationSheetProps) => {
+const MeterValidationSheet = ({ readings, onDataChange }: MeterValidationSheetProps) => {
   const [loggerRow1Idx, setLoggerRow1Idx] = useState<string>("");
   const [loggerRow2Idx, setLoggerRow2Idx] = useState<string>("");
   const [refRow1Idx, setRefRow1Idx] = useState<string>("");
@@ -85,6 +86,23 @@ const MeterValidationSheet = ({ readings }: MeterValidationSheetProps) => {
     setActualKwh(actual);
     setAccuracy(acc);
     setCalculated(true);
+
+    onDataChange?.({
+      loggerReading1: loggerReading1,
+      loggerReading2: loggerReading2,
+      loggerDateTime1: loggerRow1?.dateTime ?? "",
+      loggerDateTime2: loggerRow2?.dateTime ?? "",
+      refReading1: refReading1,
+      refReading2: refReading2,
+      refDateTime1: refRow1?.dateTime ?? "",
+      refDateTime2: refRow2?.dateTime ?? "",
+      multiplier,
+      loggerDiff: diff,
+      refDiff: rDiff,
+      actualKwh: actual,
+      accuracy: acc,
+      retailSerialNumber: serialNumber,
+    });
   };
 
   const getAccuracyColor = (val: number) => {

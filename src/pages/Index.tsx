@@ -9,7 +9,7 @@ import ExportSettingsPanel from "@/components/ExportSettingsPanel";
 import DocumentPreview from "@/components/DocumentPreview";
 import MeterValidationSheet from "@/components/MeterValidationSheet";
 import BravegenComparison from "@/components/BravegenComparison";
-import { MeterReading, ExportSettings } from "@/types/meter";
+import { MeterReading, ExportSettings, ValidationExportData, ComparisonExportRow } from "@/types/meter";
 import { generateValidationExcel } from "@/lib/excelGenerator";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -24,6 +24,8 @@ const Index = () => {
     feedName: "",
     serialNumber: "",
   });
+  const [validationData, setValidationData] = useState<ValidationExportData | null>(null);
+  const [comparisonData, setComparisonData] = useState<ComparisonExportRow[]>([]);
 
   const fileToBase64 = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -99,7 +101,7 @@ const Index = () => {
       return;
     }
     try {
-      const blob = await generateValidationExcel(readings, settings);
+      const blob = await generateValidationExcel(readings, settings, validationData, comparisonData);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -208,7 +210,7 @@ const Index = () => {
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
             Meter Read Validation
           </h2>
-          <MeterValidationSheet readings={readings} />
+          <MeterValidationSheet readings={readings} onDataChange={setValidationData} />
         </div>
 
         {/* BraveGen Comparison */}
@@ -216,7 +218,7 @@ const Index = () => {
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
             BraveGen Data Comparison
           </h2>
-          <BravegenComparison readings={readings} />
+          <BravegenComparison readings={readings} onDataChange={setComparisonData} />
         </div>
 
         {/* Actions */}
