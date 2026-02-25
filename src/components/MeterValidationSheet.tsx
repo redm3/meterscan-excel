@@ -71,10 +71,40 @@ const MeterValidationSheet = ({ readings, onDataChange }: MeterValidationSheetPr
   const [actualKwh, setActualKwh] = useState(0);
   const [accuracy, setAccuracy] = useState(0);
 
-  // Reset calculated state when inputs change
+  // Auto-calculate and propagate when inputs change
   useEffect(() => {
     setCalculated(false);
-  }, [loggerRow1Idx, loggerRow2Idx, refRow1Idx, refRow2Idx, multiplier, readings]);
+    // Auto-propagate current values to parent for export
+    const lr1 = getRow(loggerRow1Idx);
+    const lr2 = getRow(loggerRow2Idx);
+    const rr1 = getRow(refRow1Idx);
+    const rr2 = getRow(refRow2Idx);
+    const lR1 = lr1?.physicalMeterRead ?? 0;
+    const lR2 = lr2?.physicalMeterRead ?? 0;
+    const rR1 = rr1?.physicalMeterRead ?? 0;
+    const rR2 = rr2?.physicalMeterRead ?? 0;
+    const diff = lR2 - lR1;
+    const rDiff = rR2 - rR1;
+    const actual = diff * multiplier;
+    const acc = rDiff !== 0 ? (actual / rDiff) * 100 : 0;
+
+    onDataChange?.({
+      loggerReading1: lR1,
+      loggerReading2: lR2,
+      loggerDateTime1: lr1?.dateTime ?? "",
+      loggerDateTime2: lr2?.dateTime ?? "",
+      refReading1: rR1,
+      refReading2: rR2,
+      refDateTime1: rr1?.dateTime ?? "",
+      refDateTime2: rr2?.dateTime ?? "",
+      multiplier,
+      loggerDiff: diff,
+      refDiff: rDiff,
+      actualKwh: actual,
+      accuracy: acc,
+      retailSerialNumber: serialNumber,
+    });
+  }, [loggerRow1Idx, loggerRow2Idx, refRow1Idx, refRow2Idx, multiplier, readings, serialNumber]);
 
   const handleCalculate = () => {
     const diff = loggerReading2 - loggerReading1;

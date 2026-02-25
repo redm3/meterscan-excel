@@ -254,6 +254,32 @@ const BravegenComparison = ({ readings, onDataChange }: BravegenComparisonProps)
     return out;
   };
 
+  /** Propagate comparison data to parent for Excel export */
+  const propagateExportData = useCallback((rows: ComparisonRow[]) => {
+    const exportRows: ComparisonExportRow[] = rows.map((row) => {
+      const bgIdx = bravegenData.findIndex((bg, i) => bgKey(bg, i) === row.bravegenKey);
+      const bg = bgIdx >= 0 ? bravegenData[bgIdx] : null;
+      const extracted = readings.find((r) => r.id === row.extractedId);
+
+      let accuracy = row.accuracy;
+      let bgUsage = row.bravegenUsage ?? bg?.usage ?? null;
+      let extReading = row.extractedReading ?? extracted?.physicalMeterRead ?? null;
+      if (accuracy == null && bgUsage != null && extReading != null && extReading !== 0) {
+        accuracy = (bgUsage / extReading) * 100;
+      }
+
+      return {
+        loadName: extracted?.loadName ?? "",
+        dateTime: extracted?.dateTime ?? null,
+        physicalMeterRead: extReading,
+        bravegenDateTime: bg?.event ?? null,
+        bravegenUsage: bgUsage,
+        accuracy,
+      };
+    });
+    onDataChange?.(exportRows);
+  }, [bravegenData, readings, onDataChange]);
+
   /** Auto-match: for each extracted reading, find the BraveGen row with best name match,
    *  then pick the one whose time is nearest (rounded to 15-min intervals). */
   const handleAutoMatch = () => {
@@ -319,6 +345,7 @@ const BravegenComparison = ({ readings, onDataChange }: BravegenComparisonProps)
     });
 
     setComparisonRows(newRows);
+    propagateExportData(newRows);
     toast.success(`Auto-matched ${newRows.filter((r) => r.bravegenKey).length} of ${readings.length} readings`);
   };
 
@@ -346,24 +373,8 @@ const BravegenComparison = ({ readings, onDataChange }: BravegenComparisonProps)
     });
 
     setComparisonRows(updated);
-
-    // Expose data for Excel export
-    const exportRows: ComparisonExportRow[] = updated.map((row) => {
-      const bgIdx = bravegenData.findIndex((bg, i) => bgKey(bg, i) === row.bravegenKey);
-      const bg = bgIdx >= 0 ? bravegenData[bgIdx] : null;
-      const extracted = readings.find((r) => r.id === row.extractedId);
-      return {
-        loadName: extracted?.loadName ?? "",
-        dateTime: extracted?.dateTime ?? null,
-        physicalMeterRead: row.extractedReading,
-        bravegenDateTime: bg?.event ?? null,
-        bravegenUsage: row.bravegenUsage,
-        accuracy: row.accuracy,
-      };
-    });
-    onDataChange?.(exportRows);
+    propagateExportData(updated);
   };
-
   const getAccuracyColor = (val: number) => {
     if (val >= 95 && val <= 105) return "bg-green-600/20 text-green-400 border-green-600/40";
     if ((val >= 90 && val < 95) || (val > 105 && val <= 110)) return "bg-yellow-600/20 text-yellow-400 border-yellow-600/40";
