@@ -55,8 +55,42 @@ function parseDate(val: any): Date | null {
   }
   if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
   const s = String(val).trim();
-  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
-  if (m) return new Date(+m[3], +m[2] - 1, +m[1], +m[4], +m[5], +(m[6] || 0));
+
+  // dd/MM/yyyy HH:mm or dd/MM/yyyy HH:mm:ss
+  const m1 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (m1) return new Date(+m1[3], +m1[2] - 1, +m1[1], +m1[4], +m1[5], +(m1[6] || 0));
+
+  // dd/MM/yyyy (no time)
+  const m1b = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m1b) return new Date(+m1b[3], +m1b[2] - 1, +m1b[1]);
+
+  // dd/M/yy HHMM  (e.g. "24/2/26 0950")
+  const m2 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})\s+(\d{3,4})$/);
+  if (m2) {
+    let yr = +m2[3];
+    yr = yr < 70 ? 2000 + yr : 1900 + yr;
+    const timeStr = m2[4].padStart(4, "0");
+    const hr = +timeStr.slice(0, 2);
+    const mn = +timeStr.slice(2, 4);
+    return new Date(yr, +m2[2] - 1, +m2[1], hr, mn, 0);
+  }
+
+  // dd/M/yy HH:mm  (e.g. "24/2/26 09:50")
+  const m3 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (m3) {
+    let yr = +m3[3];
+    yr = yr < 70 ? 2000 + yr : 1900 + yr;
+    return new Date(yr, +m3[2] - 1, +m3[1], +m3[4], +m3[5], +(m3[6] || 0));
+  }
+
+  // dd/M/yy (no time, 2-digit year)
+  const m4 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/);
+  if (m4) {
+    let yr = +m4[3];
+    yr = yr < 70 ? 2000 + yr : 1900 + yr;
+    return new Date(yr, +m4[2] - 1, +m4[1]);
+  }
+
   const d = new Date(s);
   return isNaN(d.getTime()) ? null : d;
 }
@@ -260,17 +294,15 @@ const BravegenComparison = ({ readings }: BravegenComparisonProps) => {
       for (const c of candidates) {
         if (readingRounded && c.bg.eventDate) {
           const diff = Math.abs(readingRounded.getTime() - c.bg.eventDate.getTime());
-          // Prefer better name match first, then closest time
-          if (c.nameSim > bestNameSim || (c.nameSim === bestNameSim && diff < bestTimeDiff)) {
+          // Among candidates with similar name scores, pick closest time
+          if (diff < bestTimeDiff || (diff === bestTimeDiff && c.nameSim > bestNameSim)) {
             bestTimeDiff = diff;
             bestNameSim = c.nameSim;
             bestKey = bgKey(c.bg, c.idx);
           }
-        } else if (c.nameSim > bestNameSim) {
-          // No time info, just use name similarity
+        } else if (bestTimeDiff === Infinity && c.nameSim > bestNameSim) {
           bestNameSim = c.nameSim;
           bestKey = bgKey(c.bg, c.idx);
-          bestTimeDiff = Infinity;
         }
       }
 
