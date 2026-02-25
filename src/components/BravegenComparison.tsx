@@ -20,7 +20,7 @@ import {
   TableBody,
   TableCell,
 } from "@/components/ui/table";
-import { MeterReading } from "@/types/meter";
+import { MeterReading, ComparisonExportRow } from "@/types/meter";
 
 interface BravegenRow {
   event: string;
@@ -35,8 +35,8 @@ interface BravegenRow {
 
 interface ComparisonRow {
   id: string;
-  bravegenKey: string; // "loadName||eventISO" unique key
-  extractedId: string; // reading.id from extracted data
+  bravegenKey: string;
+  extractedId: string;
   calculated: boolean;
   accuracy: number | null;
   bravegenUsage: number | null;
@@ -45,6 +45,7 @@ interface ComparisonRow {
 
 interface BravegenComparisonProps {
   readings: MeterReading[];
+  onDataChange?: (data: ComparisonExportRow[]) => void;
 }
 
 function parseDate(val: any): Date | null {
@@ -124,7 +125,7 @@ function bgKey(row: BravegenRow, idx: number): string {
   return `${row.loadName}||${row.eventDate?.toISOString() ?? idx}`;
 }
 
-const BravegenComparison = ({ readings }: BravegenComparisonProps) => {
+const BravegenComparison = ({ readings, onDataChange }: BravegenComparisonProps) => {
   const [bravegenData, setBravegenData] = useState<BravegenRow[]>([]);
   const [fileName, setFileName] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -322,29 +323,45 @@ const BravegenComparison = ({ readings }: BravegenComparisonProps) => {
   };
 
   const handleCalculateAll = () => {
-    setComparisonRows((prev) =>
-      prev.map((row) => {
-        const bgIdx = bravegenData.findIndex((bg, i) => bgKey(bg, i) === row.bravegenKey);
-        const bg = bgIdx >= 0 ? bravegenData[bgIdx] : null;
-        const extracted = readings.find((r) => r.id === row.extractedId);
+    const updated = comparisonRows.map((row) => {
+      const bgIdx = bravegenData.findIndex((bg, i) => bgKey(bg, i) === row.bravegenKey);
+      const bg = bgIdx >= 0 ? bravegenData[bgIdx] : null;
+      const extracted = readings.find((r) => r.id === row.extractedId);
 
-        if (!bg || !extracted || bg.usage == null || extracted.physicalMeterRead == null) {
-          return { ...row, calculated: true, accuracy: null, bravegenUsage: bg?.usage ?? null, extractedReading: extracted?.physicalMeterRead ?? null };
-        }
+      if (!bg || !extracted || bg.usage == null || extracted.physicalMeterRead == null) {
+        return { ...row, calculated: true, accuracy: null, bravegenUsage: bg?.usage ?? null, extractedReading: extracted?.physicalMeterRead ?? null };
+      }
 
-        const accuracy = extracted.physicalMeterRead !== 0
-          ? (bg.usage / extracted.physicalMeterRead) * 100
-          : null;
+      const accuracy = extracted.physicalMeterRead !== 0
+        ? (bg.usage / extracted.physicalMeterRead) * 100
+        : null;
 
-        return {
-          ...row,
-          calculated: true,
-          accuracy,
-          bravegenUsage: bg.usage,
-          extractedReading: extracted.physicalMeterRead,
-        };
-      })
-    );
+      return {
+        ...row,
+        calculated: true,
+        accuracy,
+        bravegenUsage: bg.usage,
+        extractedReading: extracted.physicalMeterRead,
+      };
+    });
+
+    setComparisonRows(updated);
+
+    // Expose data for Excel export
+    const exportRows: ComparisonExportRow[] = updated.map((row) => {
+      const bgIdx = bravegenData.findIndex((bg, i) => bgKey(bg, i) === row.bravegenKey);
+      const bg = bgIdx >= 0 ? bravegenData[bgIdx] : null;
+      const extracted = readings.find((r) => r.id === row.extractedId);
+      return {
+        loadName: extracted?.loadName ?? "",
+        dateTime: extracted?.dateTime ?? null,
+        physicalMeterRead: row.extractedReading,
+        bravegenDateTime: bg?.event ?? null,
+        bravegenUsage: row.bravegenUsage,
+        accuracy: row.accuracy,
+      };
+    });
+    onDataChange?.(exportRows);
   };
 
   const getAccuracyColor = (val: number) => {

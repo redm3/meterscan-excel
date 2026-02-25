@@ -1,9 +1,11 @@
 import ExcelJS from "exceljs";
-import { MeterReading, ExportSettings } from "@/types/meter";
+import { MeterReading, ExportSettings, ValidationExportData, ComparisonExportRow } from "@/types/meter";
 
 export async function generateValidationExcel(
   readings: MeterReading[],
-  settings: ExportSettings
+  settings: ExportSettings,
+  validationData?: ValidationExportData | null,
+  comparisonData?: ComparisonExportRow[]
 ): Promise<Blob> {
   const workbook = new ExcelJS.Workbook();
   const ws = workbook.addWorksheet("Validation", {
@@ -42,23 +44,9 @@ export async function generateValidationExcel(
   titleCell.font = { bold: true, size: 14 };
   titleCell.alignment = centerAlign;
 
-  // Rows 4-7: Info fields
-  ws.getCell("A4").value = "Feed:";
-  ws.getCell("B4").value = settings.feedName;
-  ws.getCell("A5").value = "SN:";
-  ws.getCell("B5").value = settings.serialNumber;
-  ws.getCell("A6").value = "Site:";
-  ws.getCell("B6").value = settings.siteName;
-  ws.getCell("A7").value = "Building:";
-  ws.getCell("B7").value = settings.buildingName;
-
-  for (let r = 4; r <= 7; r++) {
-    ws.getCell(`A${r}`).font = { bold: true };
-  }
-
-  // Row 9: Main Incomer header (yellow)
-  ws.mergeCells("A9:K9");
-  const incomerHeader = ws.getCell("A9");
+  // Row 4: Main Incomer header (yellow)
+  ws.mergeCells("A4:K4");
+  const incomerHeader = ws.getCell("A4");
   incomerHeader.value = "Main Incomer";
   incomerHeader.font = { bold: true, size: 12 };
   incomerHeader.alignment = centerAlign;
@@ -68,29 +56,120 @@ export async function generateValidationExcel(
     fgColor: { argb: "FFFFFF00" },
   };
 
-  // Row 11: Main incomer metering sub-headers
-  const row11Labels = ["ICP", `Meter SN`, "DateTime", "Reading", "Main Incomer DateTime", "Main Incomer Reading", "kWh"];
-  row11Labels.forEach((label, i) => {
-    const cell = ws.getCell(11, i + 1);
+  // Row 5: ICP + serial number
+  ws.getCell("A5").value = "ICP";
+  ws.getCell("A5").font = { bold: true, italic: true };
+  ws.getCell("B5").value = settings.serialNumber || "";
+
+  // Row 6: Meter SN header
+  ws.mergeCells("B6:D6");
+  ws.getCell("B6").value = `Meter SN ${validationData?.retailSerialNumber || settings.serialNumber || ""}`;
+  ws.getCell("B6").font = { bold: true };
+  ws.getCell("B6").alignment = centerAlign;
+
+  // Main Incomer header on right side
+  ws.mergeCells("F6:G6");
+  ws.getCell("F6").value = "Main Incomer";
+  ws.getCell("F6").font = { bold: true };
+  ws.getCell("F6").alignment = centerAlign;
+
+  // Row 7: Sub-headers
+  const row7Labels: { col: string; label: string }[] = [
+    { col: "B", label: "DateTime" },
+    { col: "C", label: "Reading" },
+    { col: "F", label: "DateTime" },
+    { col: "G", label: "Reading" },
+  ];
+  row7Labels.forEach(({ col, label }) => {
+    const cell = ws.getCell(`${col}7`);
     cell.value = label;
     cell.font = headerFont;
     cell.alignment = centerAlign;
     cell.border = thinBorder;
   });
 
-  // Row 16: Multiplier / Diff
-  ws.getCell("A16").value = "Multiplier";
-  ws.getCell("B16").value = 1;
-  ws.getCell("D16").value = "Diff";
-  ws.getCell("E16").value = 0;
+  if (validationData) {
+    // Row 8: 1st readings
+    ws.getCell("B8").value = validationData.loggerDateTime1;
+    ws.getCell("C8").value = validationData.loggerReading1;
+    ws.getCell("F8").value = validationData.refDateTime1;
+    ws.getCell("G8").value = validationData.refReading1;
+    ws.getCell("H8").value = "kWh";
 
-  // Row 17: Convert to Actual kWh
-  ws.getCell("A17").value = "Convert to Actual kWh";
-  ws.getCell("B17").value = 0;
-  ws.getCell("D17").value = "Accuracy%";
-  ws.getCell("E17").value = "#DIV/0!";
+    // Row 9: 2nd readings
+    ws.getCell("B9").value = validationData.loggerDateTime2;
+    ws.getCell("C9").value = validationData.loggerReading2;
+    ws.getCell("F9").value = validationData.refDateTime2;
+    ws.getCell("G9").value = validationData.refReading2;
+    ws.getCell("H9").value = "kWh";
 
-  // Row 20: Data table headers
+    // Row 10: Multiplier / Diff
+    ws.getCell("A10").value = "Multiplier";
+    ws.getCell("A10").font = { bold: true };
+    ws.getCell("B10").value = validationData.multiplier;
+    ws.getCell("C10").value = "Diff";
+    ws.getCell("C10").font = { bold: true };
+    ws.getCell("D10").value = validationData.loggerDiff;
+    ws.getCell("F10").value = "Diff";
+    ws.getCell("F10").font = { bold: true };
+    ws.getCell("G10").value = validationData.refDiff;
+
+    // Row 11: Convert to Actual kWh / Accuracy
+    ws.getCell("A11").value = validationData.multiplier;
+    ws.getCell("B11").value = "Convert to Actual kWh";
+    ws.getCell("B11").font = { bold: true };
+    ws.getCell("D11").value = validationData.actualKwh;
+    ws.getCell("E11").value = "kWh";
+    ws.getCell("F11").value = "Accuracy%";
+    ws.getCell("F11").font = { bold: true };
+    const accCell = ws.getCell("G11");
+    accCell.value = `${validationData.accuracy.toFixed(3)}%`;
+    accCell.font = { bold: true };
+    // Color the accuracy cell
+    if (validationData.accuracy >= 95 && validationData.accuracy <= 105) {
+      accCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF92D050" } };
+    } else if (validationData.accuracy >= 90 && validationData.accuracy <= 110) {
+      accCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } };
+    } else {
+      accCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFF0000" } };
+    }
+
+    // Style rows 8-9
+    [8, 9].forEach((r) => {
+      ["B", "C", "F", "G", "H"].forEach((col) => {
+        const cell = ws.getCell(`${col}${r}`);
+        cell.alignment = centerAlign;
+        cell.border = thinBorder;
+        cell.font = { size: 10 };
+      });
+    });
+  } else {
+    // Fallback: basic info rows
+    ws.getCell("A6").value = "Feed:";
+    ws.getCell("B6").value = settings.feedName;
+    ws.getCell("A7").value = "SN:";
+    ws.getCell("B7").value = settings.serialNumber;
+    ws.getCell("A8").value = "Site:";
+    ws.getCell("B8").value = settings.siteName;
+    ws.getCell("A9").value = "Building:";
+    ws.getCell("B9").value = settings.buildingName;
+    for (let r = 6; r <= 9; r++) {
+      ws.getCell(`A${r}`).font = { bold: true };
+    }
+
+    // Row 10: Multiplier / Diff
+    ws.getCell("A10").value = "Multiplier";
+    ws.getCell("B10").value = 1;
+    ws.getCell("D10").value = "Diff";
+    ws.getCell("E10").value = 0;
+    ws.getCell("A11").value = "Convert to Actual kWh";
+    ws.getCell("B11").value = 0;
+    ws.getCell("D11").value = "Accuracy%";
+    ws.getCell("E11").value = "#DIV/0!";
+  }
+
+  // Row 14: Data table headers
+  const dataStartRow = 14;
   const dataHeaders = [
     { label: "Load", col: 1 },
     { label: "Load ID", col: 2 },
@@ -107,7 +186,7 @@ export async function generateValidationExcel(
   ];
 
   dataHeaders.forEach(({ label, col, color }) => {
-    const cell = ws.getCell(20, col);
+    const cell = ws.getCell(dataStartRow, col);
     cell.value = label;
     cell.font = { bold: true, size: 10 };
     cell.alignment = { ...centerAlign, wrapText: true };
@@ -121,9 +200,19 @@ export async function generateValidationExcel(
     }
   });
 
-  // Data rows starting at 21
+  // Build a lookup from comparison data
+  const compLookup = new Map<string, ComparisonExportRow>();
+  if (comparisonData) {
+    for (const c of comparisonData) {
+      if (c.loadName) compLookup.set(c.loadName, c);
+    }
+  }
+
+  // Data rows
   readings.forEach((reading, index) => {
-    const row = 21 + index;
+    const row = dataStartRow + 1 + index;
+    const comp = compLookup.get(reading.loadName);
+
     const setCellValue = (col: number, value: string | number | null) => {
       const cell = ws.getCell(row, col);
       cell.value = value ?? "";
@@ -134,16 +223,34 @@ export async function generateValidationExcel(
 
     setCellValue(1, reading.loadName);
     setCellValue(2, reading.loadId);
-    setCellValue(3, ""); // Metering
-    setCellValue(4, ""); // Meter Supplied
+    setCellValue(3, "");
+    setCellValue(4, "");
     setCellValue(5, reading.ctRating);
-    setCellValue(6, ""); // CT Rating in Mender
+    setCellValue(6, "");
     setCellValue(7, reading.dateTime);
     setCellValue(8, reading.physicalMeterRead);
-    setCellValue(9, ""); // Date/Time BG
-    setCellValue(10, ""); // BG Cumulative
-    setCellValue(11, ""); // Accuracy%
-    setCellValue(12, ""); // Comments
+    setCellValue(9, comp?.bravegenDateTime ?? "");
+    setCellValue(10, comp?.bravegenUsage ?? "");
+
+    // Accuracy
+    if (comp?.accuracy != null) {
+      const accCell = ws.getCell(row, 11);
+      accCell.value = `${comp.accuracy.toFixed(1)}%`;
+      accCell.alignment = centerAlign;
+      accCell.border = thinBorder;
+      accCell.font = { size: 10, bold: true };
+      if (comp.accuracy >= 95 && comp.accuracy <= 105) {
+        accCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF92D050" } };
+      } else if (comp.accuracy >= 90 && comp.accuracy <= 110) {
+        accCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } };
+      } else {
+        accCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFF0000" } };
+      }
+    } else {
+      setCellValue(11, "");
+    }
+
+    setCellValue(12, "");
 
     // Green background for cols G, H
     [7, 8].forEach((col) => {
