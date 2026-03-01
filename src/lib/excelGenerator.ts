@@ -103,29 +103,34 @@ export async function generateValidationExcel(
     ws.getCell("G9").value = validationData.refReading2;
     ws.getCell("H9").value = "kWh";
 
-    // Row 10: Multiplier / Diff
+    // Row 10: Multiplier / Diff (FORMULAS)
     ws.getCell("A10").value = "Multiplier";
     ws.getCell("A10").font = { bold: true };
     ws.getCell("B10").value = validationData.multiplier;
     ws.getCell("C10").value = "Diff";
     ws.getCell("C10").font = { bold: true };
-    ws.getCell("D10").value = validationData.loggerDiff;
+    // D10 = C9 - C8 (logger diff)
+    ws.getCell("D10").value = { formula: "C9-C8" } as any;
     ws.getCell("F10").value = "Diff";
     ws.getCell("F10").font = { bold: true };
-    ws.getCell("G10").value = validationData.refDiff;
+    // G10 = G9 - G8 (ref diff)
+    ws.getCell("G10").value = { formula: "G9-G8" } as any;
 
-    // Row 11: Convert to Actual kWh / Accuracy
+    // Row 11: Convert to Actual kWh / Accuracy (FORMULAS)
     ws.getCell("A11").value = validationData.multiplier;
     ws.getCell("B11").value = "Convert to Actual kWh";
     ws.getCell("B11").font = { bold: true };
-    ws.getCell("D11").value = validationData.actualKwh;
+    // D11 = D10 * B10 (diff * multiplier = actual kWh)
+    ws.getCell("D11").value = { formula: "D10*B10" } as any;
     ws.getCell("E11").value = "kWh";
     ws.getCell("F11").value = "Accuracy%";
     ws.getCell("F11").font = { bold: true };
+    // G11 = (D11 / G10) * 100 with error handling
     const accCell = ws.getCell("G11");
-    accCell.value = `${validationData.accuracy.toFixed(3)}%`;
+    accCell.value = { formula: 'IF(G10=0,"#DIV/0!",D11/G10*100)' } as any;
+    accCell.numFmt = '0.000"%"';
     accCell.font = { bold: true };
-    // Color the accuracy cell
+    // Color based on pre-calculated accuracy
     if (validationData.accuracy >= 95 && validationData.accuracy <= 105) {
       accCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF92D050" } };
     } else if (validationData.accuracy >= 90 && validationData.accuracy <= 110) {
@@ -157,15 +162,19 @@ export async function generateValidationExcel(
       ws.getCell(`A${r}`).font = { bold: true };
     }
 
-    // Row 10: Multiplier / Diff
+    // Row 10: Multiplier / Diff (FORMULAS even in fallback)
     ws.getCell("A10").value = "Multiplier";
     ws.getCell("B10").value = 1;
-    ws.getCell("D10").value = "Diff";
-    ws.getCell("E10").value = 0;
+    ws.getCell("C10").value = "Diff";
+    ws.getCell("D10").value = { formula: "C9-C8" } as any;
+    ws.getCell("F10").value = "Diff";
+    ws.getCell("G10").value = { formula: "G9-G8" } as any;
     ws.getCell("A11").value = "Convert to Actual kWh";
-    ws.getCell("B11").value = 0;
-    ws.getCell("D11").value = "Accuracy%";
-    ws.getCell("E11").value = "#DIV/0!";
+    ws.getCell("D11").value = { formula: "D10*B10" } as any;
+    ws.getCell("E11").value = "kWh";
+    ws.getCell("F11").value = "Accuracy%";
+    ws.getCell("G11").value = { formula: 'IF(G10=0,"#DIV/0!",D11/G10*100)' } as any;
+    ws.getCell("G11").numFmt = '0.000"%"';
   }
 
   // Row 14: Data table headers
@@ -232,13 +241,17 @@ export async function generateValidationExcel(
     setCellValue(9, comp?.bravegenDateTime ?? "");
     setCellValue(10, comp?.bravegenUsage ?? "");
 
-    // Accuracy
+    // Accuracy% = (J/H)*100 as a formula so user can edit values
+    const accCell = ws.getCell(row, 11);
+    const hRef = `H${row}`;
+    const jRef = `J${row}`;
+    accCell.value = { formula: `IF(OR(${hRef}="",${hRef}=0,${jRef}=""),"",${jRef}/${hRef}*100)` } as any;
+    accCell.numFmt = '0.0"%"';
+    accCell.alignment = centerAlign;
+    accCell.border = thinBorder;
+    accCell.font = { size: 10, bold: true };
+    // Set initial conditional color based on pre-calculated value
     if (comp?.accuracy != null) {
-      const accCell = ws.getCell(row, 11);
-      accCell.value = `${comp.accuracy.toFixed(1)}%`;
-      accCell.alignment = centerAlign;
-      accCell.border = thinBorder;
-      accCell.font = { size: 10, bold: true };
       if (comp.accuracy >= 95 && comp.accuracy <= 105) {
         accCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF92D050" } };
       } else if (comp.accuracy >= 90 && comp.accuracy <= 110) {
@@ -246,8 +259,6 @@ export async function generateValidationExcel(
       } else {
         accCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFF0000" } };
       }
-    } else {
-      setCellValue(11, "");
     }
 
     setCellValue(12, "");
