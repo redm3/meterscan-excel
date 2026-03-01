@@ -115,7 +115,7 @@ const Index = () => {
       console.error("Export error:", err);
       toast.error("Failed to generate Excel file.");
     }
-  }, [readings, settings]);
+  }, [readings, settings, validationData, comparisonData]);
 
   const clearPreview = () => {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
