@@ -44,3 +44,13 @@ export interface ComparisonExportRow {
   bravegenUsage: number | null;
   accuracy: number | null;
 }
+
+export interface BravegenRawRow {
+  event: string;
+  loadName: string;
+  channelKey: string;
+  reference: string;
+  utilityType: string;
+  unit: string;
+  usage: number | null;
+}

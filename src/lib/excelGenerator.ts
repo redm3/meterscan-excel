@@ -1,11 +1,14 @@
 import ExcelJS from "exceljs";
-import { MeterReading, ExportSettings, ValidationExportData, ComparisonExportRow } from "@/types/meter";
+import { MeterReading, ExportSettings, ValidationExportData, ComparisonExportRow, BravegenRawRow } from "@/types/meter";
 
 export async function generateValidationExcel(
   readings: MeterReading[],
   settings: ExportSettings,
   validationData?: ValidationExportData | null,
-  comparisonData?: ComparisonExportRow[]
+  comparisonData?: ComparisonExportRow[],
+  bravegenRawData?: BravegenRawRow[],
+  sourceImageBase64?: string | null,
+  sourceImageMime?: string | null
 ): Promise<Blob> {
   const workbook = new ExcelJS.Workbook();
   const ws = workbook.addWorksheet("Validation", {
@@ -281,6 +284,52 @@ export async function generateValidationExcel(
       };
     });
   });
+
+  // ─── Tab 2: Source Document Image ───
+  if (sourceImageBase64 && sourceImageMime) {
+    const imgSheet = workbook.addWorksheet("Source Document");
+    const ext = sourceImageMime === "image/png" ? "png" : "jpeg";
+    const imageId = workbook.addImage({
+      base64: sourceImageBase64,
+      extension: ext,
+    });
+    // Place the image starting at A1, spanning a large area
+    imgSheet.addImage(imageId, {
+      tl: { col: 0, row: 0 },
+      ext: { width: 800, height: 1100 },
+    });
+    imgSheet.getColumn(1).width = 120;
+  }
+
+  // ─── Tab 3: BraveGen Raw Data ───
+  if (bravegenRawData && bravegenRawData.length > 0) {
+    const bgSheet = workbook.addWorksheet("BraveGen Data");
+    const bgHeaders = ["Event", "Load/Channel Name", "Channel Key", "Reference", "Utility Type", "Unit", "Usage"];
+    const bgHeaderRow = bgSheet.getRow(1);
+    bgHeaders.forEach((h, i) => {
+      const cell = bgHeaderRow.getCell(i + 1);
+      cell.value = h;
+      cell.font = { bold: true, size: 11 };
+      cell.alignment = { horizontal: "center", vertical: "middle" };
+      cell.border = thinBorder;
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9E1F2" } };
+    });
+    bgSheet.columns = [
+      { width: 22 }, { width: 28 }, { width: 18 }, { width: 20 }, { width: 16 }, { width: 10 }, { width: 14 },
+    ];
+
+    bravegenRawData.forEach((row, idx) => {
+      const r = bgSheet.getRow(idx + 2);
+      const values = [row.event, row.loadName, row.channelKey, row.reference, row.utilityType, row.unit, row.usage];
+      values.forEach((v, i) => {
+        const cell = r.getCell(i + 1);
+        cell.value = v ?? "";
+        cell.alignment = { horizontal: "center", vertical: "middle" };
+        cell.border = thinBorder;
+        cell.font = { size: 10 };
+      });
+    });
+  }
 
   const buffer = await workbook.xlsx.writeBuffer();
   return new Blob([buffer], {
