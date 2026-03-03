@@ -184,10 +184,10 @@ const BravegenComparison = ({ readings, onDataChange, onRawDataChange }: Bravege
     reader.onload = (e) => {
       try {
         const wb = isCSV
-          ? XLSX.read((e.target?.result as string).replace(/^\uFEFF/, ""), { type: "string" })
+          ? XLSX.read((e.target?.result as string).replace(/^\uFEFF/, ""), { type: "string", raw: true })
           : XLSX.read(new Uint8Array(e.target?.result as ArrayBuffer), { type: "array", cellDates: true });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        const json: any[] = XLSX.utils.sheet_to_json(ws, { defval: null });
+        const json: any[] = XLSX.utils.sheet_to_json(ws, { defval: null, raw: true });
         processRows(json);
         setFileName(file.name);
         toast.success(`Loaded ${json.length} rows from ${file.name}`);
