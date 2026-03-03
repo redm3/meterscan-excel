@@ -9,7 +9,7 @@ import ExportSettingsPanel from "@/components/ExportSettingsPanel";
 import DocumentPreview from "@/components/DocumentPreview";
 import MeterValidationSheet from "@/components/MeterValidationSheet";
 import BravegenComparison from "@/components/BravegenComparison";
-import { MeterReading, ExportSettings, ValidationExportData, ComparisonExportRow } from "@/types/meter";
+import { MeterReading, ExportSettings, ValidationExportData, ComparisonExportRow, BravegenRawRow } from "@/types/meter";
 import { generateValidationExcel } from "@/lib/excelGenerator";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -26,6 +26,9 @@ const Index = () => {
   });
   const [validationData, setValidationData] = useState<ValidationExportData | null>(null);
   const [comparisonData, setComparisonData] = useState<ComparisonExportRow[]>([]);
+  const [bravegenRawData, setBravegenRawData] = useState<BravegenRawRow[]>([]);
+  const [sourceImageBase64, setSourceImageBase64] = useState<string | null>(null);
+  const [sourceImageMime, setSourceImageMime] = useState<string | null>(null);
 
   const fileToBase64 = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -59,6 +62,15 @@ const Index = () => {
     try {
       const imageBase64 = await fileToBase64(file);
 
+      // Store source image for Excel export
+      if (file.type.startsWith("image/")) {
+        setSourceImageBase64(imageBase64);
+        setSourceImageMime(file.type);
+      } else {
+        // PDF - we can't embed directly, but store null
+        setSourceImageBase64(null);
+        setSourceImageMime(null);
+      }
       const { data, error } = await supabase.functions.invoke("extract-meter-data", {
         body: { imageBase64, mimeType: file.type },
       });
@@ -101,7 +113,7 @@ const Index = () => {
       return;
     }
     try {
-      const blob = await generateValidationExcel(readings, settings, validationData, comparisonData);
+      const blob = await generateValidationExcel(readings, settings, validationData, comparisonData, bravegenRawData, sourceImageBase64, sourceImageMime);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -115,7 +127,7 @@ const Index = () => {
       console.error("Export error:", err);
       toast.error("Failed to generate Excel file.");
     }
-  }, [readings, settings, validationData, comparisonData]);
+  }, [readings, settings, validationData, comparisonData, bravegenRawData, sourceImageBase64, sourceImageMime]);
 
   const clearPreview = () => {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -218,7 +230,7 @@ const Index = () => {
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
             BraveGen Data Comparison
           </h2>
-          <BravegenComparison readings={readings} onDataChange={setComparisonData} />
+          <BravegenComparison readings={readings} onDataChange={setComparisonData} onRawDataChange={setBravegenRawData} />
         </div>
 
         {/* Actions */}

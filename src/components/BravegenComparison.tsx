@@ -20,7 +20,7 @@ import {
   TableBody,
   TableCell,
 } from "@/components/ui/table";
-import { MeterReading, ComparisonExportRow } from "@/types/meter";
+import { MeterReading, ComparisonExportRow, BravegenRawRow } from "@/types/meter";
 
 interface BravegenRow {
   event: string;
@@ -46,6 +46,7 @@ interface ComparisonRow {
 interface BravegenComparisonProps {
   readings: MeterReading[];
   onDataChange?: (data: ComparisonExportRow[]) => void;
+  onRawDataChange?: (data: BravegenRawRow[]) => void;
 }
 
 function parseDate(val: any): Date | null {
@@ -125,7 +126,7 @@ function bgKey(row: BravegenRow, idx: number): string {
   return `${row.loadName}||${row.eventDate?.toISOString() ?? idx}`;
 }
 
-const BravegenComparison = ({ readings, onDataChange }: BravegenComparisonProps) => {
+const BravegenComparison = ({ readings, onDataChange, onRawDataChange }: BravegenComparisonProps) => {
   const [bravegenData, setBravegenData] = useState<BravegenRow[]>([]);
   const [fileName, setFileName] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -160,7 +161,17 @@ const BravegenComparison = ({ readings, onDataChange }: BravegenComparisonProps)
 
     setBravegenData(rows);
     setComparisonRows([]);
-  }, []);
+    // Propagate raw data for Excel export tab
+    onRawDataChange?.(rows.map(r => ({
+      event: r.event,
+      loadName: r.loadName,
+      channelKey: r.channelKey,
+      reference: r.reference,
+      utilityType: r.utilityType,
+      unit: r.unit,
+      usage: r.usage,
+    })));
+  }, [onRawDataChange]);
 
   const handleFile = useCallback((file: File) => {
     const isCSV = file.name.match(/\.csv$/i);
