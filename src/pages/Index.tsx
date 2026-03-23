@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { toast } from "sonner";
-import { Download, RotateCcw, Plus } from "lucide-react";
+import { Download, RotateCcw, Plus, Play, Loader2 } from "lucide-react";
 import bravegenLogo from "@/assets/bravegen-logo.svg";
 import { Button } from "@/components/ui/button";
 import FileDropZone from "@/components/FileDropZone";
@@ -29,6 +29,7 @@ const Index = () => {
   const [bravegenRawData, setBravegenRawData] = useState<BravegenRawRow[]>([]);
   const [sourceImageBase64, setSourceImageBase64] = useState<string | null>(null);
   const [sourceImageMime, setSourceImageMime] = useState<string | null>(null);
+  const [queuedFiles, setQueuedFiles] = useState<File[]>([]);
 
   const fileToBase64 = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -42,71 +43,96 @@ const Index = () => {
       reader.readAsDataURL(file);
     });
 
-  const handleFileSelected = useCallback(async (file: File) => {
+  const handleFilesSelected = useCallback((files: File[]) => {
     const allowedTypes = ["application/pdf", "image/png", "image/jpeg", "image/webp"];
-    if (!allowedTypes.includes(file.type)) {
-      toast.error("Unsupported file type. Please upload a PDF, PNG, or JPG.");
-      return;
-    }
-    if (file.size > 20 * 1024 * 1024) {
-      toast.error("File too large. Maximum size is 20MB.");
-      return;
-    }
-
-    // Set preview
-    setPreviewFile(file);
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setPreviewUrl(URL.createObjectURL(file));
-
-    setIsProcessing(true);
-    try {
-      const imageBase64 = await fileToBase64(file);
-
-      // Store source image for Excel export
-      if (file.type.startsWith("image/")) {
-        setSourceImageBase64(imageBase64);
-        setSourceImageMime(file.type);
-      } else {
-        // PDF - we can't embed directly, but store null
-        setSourceImageBase64(null);
-        setSourceImageMime(null);
+    const valid = files.filter((f) => {
+      if (!allowedTypes.includes(f.type)) {
+        toast.error(`Unsupported file: ${f.name}`);
+        return false;
       }
-      const { data, error } = await supabase.functions.invoke("extract-meter-data", {
-        body: { imageBase64, mimeType: file.type },
-      });
-
-      if (error) throw error;
-
-      const extracted: MeterReading[] = (data.readings || []).map(
-        (r: any, i: number) => ({
-          id: crypto.randomUUID(),
-          loadName: r.loadName || `Load ${i + 1}`,
-          loadId: r.loadId ?? null,
-          ctRating: r.ctRating ?? null,
-          dateTime: r.dateTime ?? null,
-          physicalMeterRead: r.physicalMeterRead ?? null,
-          ph1Amps: r.ph1Amps ?? null,
-          ph2Amps: r.ph2Amps ?? null,
-          ph3Amps: r.ph3Amps ?? null,
-          voltage: r.voltage ?? null,
-          pf: r.pf ?? null,
-        })
-      );
-
-      if (extracted.length === 0) {
-        toast.warning("No meter readings found in this document. Try a clearer image.");
-      } else {
-        setReadings((prev) => [...prev, ...extracted]);
-        toast.success(`Extracted ${extracted.length} meter readings`);
+      if (f.size > 20 * 1024 * 1024) {
+        toast.error(`File too large: ${f.name}`);
+        return false;
       }
-    } catch (err: any) {
-      console.error("OCR error:", err);
-      toast.error(err.message || "Failed to extract data. Please try again.");
-    } finally {
-      setIsProcessing(false);
+      return true;
+    });
+    if (valid.length > 0) {
+      setQueuedFiles((prev) => [...prev, ...valid]);
+      toast.success(`Added ${valid.length} file${valid.length !== 1 ? "s" : ""} to queue`);
     }
   }, []);
 
+  const handleRemoveFile = useCallback((index: number) => {
+    setQueuedFiles((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  const handleClearQueue = useCallback(() => {
+    setQueuedFiles([]);
+  }, []);
+
+  const handleExtractAll = useCallback(async () => {
+    if (queuedFiles.length === 0) {
+      toast.error("No files queued for extraction.");
+      return;
+    }
+
+    setIsProcessing(true);
+    let totalExtracted = 0;
+
+    for (const file of queuedFiles) {
+      try {
+        // Set preview to the last processed file
+        setPreviewFile(file);
+        if (previewUrl) URL.revokeObjectURL(previewUrl);
+        setPreviewUrl(URL.createObjectURL(file));
+
+        const imageBase64 = await fileToBase64(file);
+
+        if (file.type.startsWith("image/")) {
+          setSourceImageBase64(imageBase64);
+          setSourceImageMime(file.type);
+        }
+
+        const { data, error } = await supabase.functions.invoke("extract-meter-data", {
+          body: { imageBase64, mimeType: file.type },
+        });
+
+        if (error) throw error;
+
+        const extracted: MeterReading[] = (data.readings || []).map(
+          (r: any, i: number) => ({
+            id: crypto.randomUUID(),
+            loadName: r.loadName || `Load ${i + 1}`,
+            loadId: r.loadId ?? null,
+            ctRating: r.ctRating ?? null,
+            dateTime: r.dateTime ?? null,
+            physicalMeterRead: r.physicalMeterRead ?? null,
+            ph1Amps: r.ph1Amps ?? null,
+            ph2Amps: r.ph2Amps ?? null,
+            ph3Amps: r.ph3Amps ?? null,
+            voltage: r.voltage ?? null,
+            pf: r.pf ?? null,
+          })
+        );
+
+        if (extracted.length > 0) {
+          setReadings((prev) => [...prev, ...extracted]);
+          totalExtracted += extracted.length;
+        } else {
+          toast.warning(`No readings found in ${file.name}`);
+        }
+      } catch (err: any) {
+        console.error("OCR error:", err);
+        toast.error(`Failed to extract from ${file.name}`);
+      }
+    }
+
+    setQueuedFiles([]);
+    if (totalExtracted > 0) {
+      toast.success(`Extracted ${totalExtracted} meter readings from ${queuedFiles.length} file${queuedFiles.length !== 1 ? "s" : ""}`);
+    }
+    setIsProcessing(false);
+  }, [queuedFiles]);
   const handleExport = useCallback(async () => {
     if (readings.length === 0) {
       toast.error("No data to export.");
@@ -179,8 +205,36 @@ const Index = () => {
 
       {/* Main Content */}
       <main className="mx-auto max-w-7xl space-y-6 px-6 py-8">
-        {/* Drop Zone */}
-        <FileDropZone onFileSelected={handleFileSelected} isProcessing={isProcessing} />
+        {/* Drop Zone & Extract Button */}
+        <div className="space-y-3">
+          <FileDropZone
+            onFilesSelected={handleFilesSelected}
+            isProcessing={isProcessing}
+            queuedFiles={queuedFiles}
+            onRemoveFile={handleRemoveFile}
+            onClearFiles={handleClearQueue}
+          />
+          {queuedFiles.length > 0 && (
+            <Button
+              onClick={handleExtractAll}
+              disabled={isProcessing}
+              className="gap-2 w-full sm:w-auto"
+              size="lg"
+            >
+              {isProcessing ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Extracting…
+                </>
+              ) : (
+                <>
+                  <Play className="h-4 w-4" />
+                  Extract All ({queuedFiles.length} file{queuedFiles.length !== 1 ? "s" : ""})
+                </>
+              )}
+            </Button>
+          )}
+        </div>
 
         {/* Document Preview */}
         <DocumentPreview file={previewFile} previewUrl={previewUrl} onClear={clearPreview} />
