@@ -205,8 +205,36 @@ const Index = () => {
 
       {/* Main Content */}
       <main className="mx-auto max-w-7xl space-y-6 px-6 py-8">
-        {/* Drop Zone */}
-        <FileDropZone onFileSelected={handleFileSelected} isProcessing={isProcessing} />
+        {/* Drop Zone & Extract Button */}
+        <div className="space-y-3">
+          <FileDropZone
+            onFilesSelected={handleFilesSelected}
+            isProcessing={isProcessing}
+            queuedFiles={queuedFiles}
+            onRemoveFile={handleRemoveFile}
+            onClearFiles={handleClearQueue}
+          />
+          {queuedFiles.length > 0 && (
+            <Button
+              onClick={handleExtractAll}
+              disabled={isProcessing}
+              className="gap-2 w-full sm:w-auto"
+              size="lg"
+            >
+              {isProcessing ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Extracting…
+                </>
+              ) : (
+                <>
+                  <Play className="h-4 w-4" />
+                  Extract All ({queuedFiles.length} file{queuedFiles.length !== 1 ? "s" : ""})
+                </>
+              )}
+            </Button>
+          )}
+        </div>
 
         {/* Document Preview */}
         <DocumentPreview file={previewFile} previewUrl={previewUrl} onClear={clearPreview} />
