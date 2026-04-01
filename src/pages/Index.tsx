@@ -57,11 +57,11 @@ const Index = () => {
       }
       setCurrentValidationId(data.id);
       setValidationName(data.name);
-      setReadings((data.readings as MeterReading[]) || []);
-      setSettings((data.settings as ExportSettings) || { siteName: "", buildingName: "", feedName: "", serialNumber: "" });
-      setValidationData((data.validation_data as ValidationExportData) || null);
-      setComparisonData((data.comparison_data as ComparisonExportRow[]) || []);
-      setBravegenRawData((data.bravegen_raw_data as BravegenRawRow[]) || []);
+      setReadings((data.readings as unknown as MeterReading[]) || []);
+      setSettings((data.settings as unknown as ExportSettings) || { siteName: "", buildingName: "", feedName: "", serialNumber: "" });
+      setValidationData((data.validation_data as unknown as ValidationExportData) || null);
+      setComparisonData((data.comparison_data as unknown as ComparisonExportRow[]) || []);
+      setBravegenRawData((data.bravegen_raw_data as unknown as BravegenRawRow[]) || []);
       setSourceImageBase64(data.source_image_base64);
       setSourceImageMime(data.source_image_mime);
     };
