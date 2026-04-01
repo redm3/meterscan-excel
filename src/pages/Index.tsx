@@ -1,8 +1,10 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Download, RotateCcw, Plus, Play, Loader2 } from "lucide-react";
+import { Download, RotateCcw, Plus, Play, Loader2, Save, LogIn, LayoutDashboard } from "lucide-react";
 import bravegenLogo from "@/assets/bravegen-logo.svg";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import FileDropZone from "@/components/FileDropZone";
 import DataPreviewTable from "@/components/DataPreviewTable";
 import ExportSettingsPanel from "@/components/ExportSettingsPanel";
@@ -12,12 +14,21 @@ import BravegenComparison from "@/components/BravegenComparison";
 import { MeterReading, ExportSettings, ValidationExportData, ComparisonExportRow, BravegenRawRow } from "@/types/meter";
 import { generateValidationExcel } from "@/lib/excelGenerator";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 
 const Index = () => {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const validationId = searchParams.get("validation");
+
   const [readings, setReadings] = useState<MeterReading[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [previewFile, setPreviewFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [validationName, setValidationName] = useState("Untitled Validation");
+  const [currentValidationId, setCurrentValidationId] = useState<string | null>(validationId);
   const [settings, setSettings] = useState<ExportSettings>({
     siteName: "",
     buildingName: "",
@@ -30,6 +41,32 @@ const Index = () => {
   const [sourceImageBase64, setSourceImageBase64] = useState<string | null>(null);
   const [sourceImageMime, setSourceImageMime] = useState<string | null>(null);
   const [queuedFiles, setQueuedFiles] = useState<File[]>([]);
+
+  // Load existing validation from DB
+  useEffect(() => {
+    if (!validationId || !user) return;
+    const load = async () => {
+      const { data, error } = await supabase
+        .from("validations")
+        .select("*")
+        .eq("id", validationId)
+        .single();
+      if (error || !data) {
+        toast.error("Could not load validation");
+        return;
+      }
+      setCurrentValidationId(data.id);
+      setValidationName(data.name);
+      setReadings((data.readings as unknown as MeterReading[]) || []);
+      setSettings((data.settings as unknown as ExportSettings) || { siteName: "", buildingName: "", feedName: "", serialNumber: "" });
+      setValidationData((data.validation_data as unknown as ValidationExportData) || null);
+      setComparisonData((data.comparison_data as unknown as ComparisonExportRow[]) || []);
+      setBravegenRawData((data.bravegen_raw_data as unknown as BravegenRawRow[]) || []);
+      setSourceImageBase64(data.source_image_base64);
+      setSourceImageMime(data.source_image_mime);
+    };
+    load();
+  }, [validationId, user]);
 
   const fileToBase64 = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -81,7 +118,6 @@ const Index = () => {
 
     for (const file of queuedFiles) {
       try {
-        // Set preview to the last processed file
         setPreviewFile(file);
         if (previewUrl) URL.revokeObjectURL(previewUrl);
         setPreviewUrl(URL.createObjectURL(file));
@@ -133,6 +169,54 @@ const Index = () => {
     }
     setIsProcessing(false);
   }, [queuedFiles]);
+
+  const handleSave = useCallback(async () => {
+    if (!user) {
+      toast.error("Sign in to save validations");
+      navigate("/auth");
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const payload = {
+        user_id: user.id,
+        name: validationName,
+        status: readings.length > 0 ? "draft" : "draft",
+        readings: readings as any,
+        settings: settings as any,
+        validation_data: validationData as any,
+        comparison_data: comparisonData as any,
+        bravegen_raw_data: bravegenRawData as any,
+        source_image_base64: sourceImageBase64,
+        source_image_mime: sourceImageMime,
+      };
+
+      if (currentValidationId) {
+        const { error } = await supabase
+          .from("validations")
+          .update(payload)
+          .eq("id", currentValidationId);
+        if (error) throw error;
+        toast.success("Validation saved!");
+      } else {
+        const { data, error } = await supabase
+          .from("validations")
+          .insert(payload)
+          .select("id")
+          .single();
+        if (error) throw error;
+        setCurrentValidationId(data.id);
+        toast.success("Validation saved!");
+      }
+    } catch (err: any) {
+      console.error("Save error:", err);
+      toast.error("Failed to save validation");
+    } finally {
+      setIsSaving(false);
+    }
+  }, [user, validationName, readings, settings, validationData, comparisonData, bravegenRawData, sourceImageBase64, sourceImageMime, currentValidationId, navigate]);
+
   const handleExport = useCallback(async () => {
     if (readings.length === 0) {
       toast.error("No data to export.");
@@ -149,11 +233,16 @@ const Index = () => {
       a.click();
       URL.revokeObjectURL(url);
       toast.success("Excel file downloaded!");
+
+      // Update status if saved
+      if (currentValidationId && user) {
+        await supabase.from("validations").update({ status: "exported" }).eq("id", currentValidationId);
+      }
     } catch (err) {
       console.error("Export error:", err);
       toast.error("Failed to generate Excel file.");
     }
-  }, [readings, settings, validationData, comparisonData, bravegenRawData, sourceImageBase64, sourceImageMime]);
+  }, [readings, settings, validationData, comparisonData, bravegenRawData, sourceImageBase64, sourceImageMime, currentValidationId, user]);
 
   const clearPreview = () => {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -164,6 +253,8 @@ const Index = () => {
   const handleClear = () => {
     setReadings([]);
     clearPreview();
+    setCurrentValidationId(null);
+    setValidationName("Untitled Validation");
     toast.info("Data cleared.");
   };
 
@@ -190,21 +281,53 @@ const Index = () => {
     <div className="min-h-screen bg-background">
       {/* Header */}
       <header className="border-b border-border bg-card">
-        <div className="mx-auto flex max-w-7xl items-center gap-3 px-6 py-4">
-          <img src={bravegenLogo} alt="BraveGen" className="h-10" />
-          <div className="hidden sm:block">
-            <h1 className="text-xl font-bold text-foreground tracking-tight">
-              Meter Data Validation Tool
-            </h1>
-            <p className="text-xs text-muted-foreground">
-              Extract · Validate · Export
-            </p>
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+          <div className="flex items-center gap-3">
+            <img src={bravegenLogo} alt="BraveGen" className="h-10" />
+            <div className="hidden sm:block">
+              <h1 className="text-xl font-bold text-foreground tracking-tight">
+                Meter Data Validation Tool
+              </h1>
+              <p className="text-xs text-muted-foreground">
+                Extract · Validate · Export
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {user ? (
+              <>
+                <Button variant="outline" size="sm" onClick={() => navigate("/dashboard")} className="gap-1.5">
+                  <LayoutDashboard className="h-3.5 w-3.5" />
+                  Dashboard
+                </Button>
+              </>
+            ) : (
+              <Button variant="outline" size="sm" onClick={() => navigate("/auth")} className="gap-1.5">
+                <LogIn className="h-3.5 w-3.5" />
+                Sign In
+              </Button>
+            )}
           </div>
         </div>
       </header>
 
       {/* Main Content */}
       <main className="mx-auto max-w-7xl space-y-6 px-6 py-8">
+        {/* Validation Name (when signed in) */}
+        {user && (
+          <div className="flex items-center gap-3">
+            <Input
+              value={validationName}
+              onChange={(e) => setValidationName(e.target.value)}
+              className="text-lg font-semibold max-w-md bg-card border-border"
+              placeholder="Validation name..."
+            />
+            {currentValidationId && (
+              <span className="text-xs text-muted-foreground">Saved</span>
+            )}
+          </div>
+        )}
+
         {/* Drop Zone & Extract Button */}
         <div className="space-y-3">
           <FileDropZone
@@ -288,10 +411,20 @@ const Index = () => {
         </div>
 
         {/* Actions */}
-        <div className="flex items-center gap-3 pt-2">
+        <div className="flex items-center gap-3 pt-2 flex-wrap">
+          <Button
+            onClick={handleSave}
+            disabled={isSaving}
+            variant="default"
+            className="gap-2"
+          >
+            {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            {user ? "Save to Account" : "Sign In to Save"}
+          </Button>
           <Button
             onClick={handleExport}
             disabled={readings.length === 0}
+            variant="outline"
             className="gap-2"
           >
             <Download className="h-4 w-4" />
