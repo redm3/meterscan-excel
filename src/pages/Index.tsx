@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Download, RotateCcw, Plus, Play, Loader2, Save, LogIn, LayoutDashboard } from "lucide-react";
+import { Download, RotateCcw, Plus, Play, Loader2, Save, LogIn, LayoutDashboard, Droplets } from "lucide-react";
 import bravegenLogo from "@/assets/bravegen-logo.svg";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -294,6 +294,10 @@ const Index = () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => navigate("/pulse-meter")} className="gap-1.5">
+              <Droplets className="h-3.5 w-3.5" />
+              Pulse Tool
+            </Button>
             {user ? (
               <>
                 <Button variant="outline" size="sm" onClick={() => navigate("/dashboard")} className="gap-1.5">
