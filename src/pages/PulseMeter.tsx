@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Droplets, Flame, Camera, X, Upload, FileSpreadsheet, ChevronDown, ChevronUp, Copy, Zap, Gauge } from "lucide-react";
+import { Droplets, Flame, Camera, X, Upload, FileSpreadsheet, ChevronDown, ChevronUp, Copy, Gauge, LogIn, LayoutDashboard, Save, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,6 +11,9 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
+import bravegenLogo from "@/assets/bravegen-logo.svg";
 import * as XLSX from "xlsx";
 
 type MeterMode = "water" | "gas";
@@ -25,6 +28,8 @@ interface SiteInfo {
 interface MeterRead {
   image: string | null;
   imageFile: File | null;
+  imageBase64: string | null;
+  imageMime: string | null;
   dateTime: string;
   reading: string;
 }
@@ -46,39 +51,38 @@ interface HubRow {
 const DEFAULT_FACTORS: Record<MeterMode, number> = { water: 0.005, gas: 0.3 };
 
 const PulseMeter = () => {
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [mode, setMode] = useState<MeterMode>("water");
   const [siteInfoOpen, setSiteInfoOpen] = useState(true);
   const [siteInfo, setSiteInfo] = useState<SiteInfo>({ feed: "", serialNumber: "", site: "", building: "" });
+  const [isSaving, setIsSaving] = useState(false);
 
-  // Section 1
-  const [firstRead, setFirstRead] = useState<MeterRead>({ image: null, imageFile: null, dateTime: "", reading: "" });
-  const [secondRead, setSecondRead] = useState<MeterRead>({ image: null, imageFile: null, dateTime: "", reading: "" });
+  const [firstRead, setFirstRead] = useState<MeterRead>({ image: null, imageFile: null, imageBase64: null, imageMime: null, dateTime: "", reading: "" });
+  const [secondRead, setSecondRead] = useState<MeterRead>({ image: null, imageFile: null, imageBase64: null, imageMime: null, dateTime: "", reading: "" });
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
 
-  // Section 2
   const [hubFile, setHubFile] = useState<string | null>(null);
   const [hubRows, setHubRows] = useState<HubRow[]>([]);
   const [selectedHubRow, setSelectedHubRow] = useState<number>(0);
   const [manualHubCount, setManualHubCount] = useState("");
   const [manualFactor, setManualFactor] = useState(String(DEFAULT_FACTORS["water"]));
 
-  // Section 3 overrides
   const [overrideFirstRead, setOverrideFirstRead] = useState("");
   const [overrideSecondRead, setOverrideSecondRead] = useState("");
   const [overrideHubCount, setOverrideHubCount] = useState("");
   const [overrideFactor, setOverrideFactor] = useState("");
 
-  // Comments
   const [comments, setComments] = useState("");
+  const [validationName, setValidationName] = useState("Untitled Pulse Validation");
 
   const firstInputRef = useRef<HTMLInputElement>(null);
   const secondInputRef = useRef<HTMLInputElement>(null);
+  const hubInputRef = useRef<HTMLInputElement>(null);
 
   const unit = mode === "water" ? "m³" : "NcM";
   const ModeIcon = mode === "water" ? Droplets : Flame;
 
-  // Derived values
   const r1 = parseFloat(overrideFirstRead || firstRead.reading) || 0;
   const r2 = parseFloat(overrideSecondRead || secondRead.reading) || 0;
   const physicalDiff = r2 - r1;
@@ -91,42 +95,47 @@ const PulseMeter = () => {
 
   const getStatus = (acc: number) => {
     if (acc === 0) return { label: "N/A", color: "bg-muted text-muted-foreground" };
-    if (acc >= 95 && acc <= 105) return { label: "PASS", color: "bg-emerald-500 text-white" };
-    if ((acc >= 90 && acc < 95) || (acc > 105 && acc <= 110)) return { label: "MARGINAL", color: "bg-amber-500 text-white" };
-    return { label: "FAIL", color: "bg-red-500 text-white" };
+    if (acc >= 95 && acc <= 105) return { label: "PASS", color: "bg-primary text-primary-foreground" };
+    if ((acc >= 90 && acc < 95) || (acc > 105 && acc <= 110)) return { label: "MARGINAL", color: "bg-yellow-500 text-black" };
+    return { label: "FAIL", color: "bg-destructive text-destructive-foreground" };
   };
-
   const status = getStatus(accuracy);
 
-  // Image handling
-  const handleImageDrop = useCallback((which: "first" | "second") => (e: React.DragEvent) => {
+  const fileToBase64 = (file: File): Promise<string> =>
+    new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve((reader.result as string).split(",")[1]);
+      reader.readAsDataURL(file);
+    });
+
+  const handleImageDrop = useCallback((which: "first" | "second") => async (e: React.DragEvent) => {
     e.preventDefault();
     const file = e.dataTransfer.files[0];
     if (!file || !file.type.startsWith("image/")) return;
     const url = URL.createObjectURL(file);
+    const base64 = await fileToBase64(file);
     const setter = which === "first" ? setFirstRead : setSecondRead;
-    setter(prev => ({ ...prev, image: url, imageFile: file }));
+    setter(prev => ({ ...prev, image: url, imageFile: file, imageBase64: base64, imageMime: file.type }));
   }, []);
 
-  const handleImageSelect = useCallback((which: "first" | "second") => (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageSelect = useCallback((which: "first" | "second") => async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const url = URL.createObjectURL(file);
+    const base64 = await fileToBase64(file);
     const setter = which === "first" ? setFirstRead : setSecondRead;
-    setter(prev => ({ ...prev, image: url, imageFile: file }));
+    setter(prev => ({ ...prev, image: url, imageFile: file, imageBase64: base64, imageMime: file.type }));
   }, []);
 
   const removeImage = (which: "first" | "second") => {
     const setter = which === "first" ? setFirstRead : setSecondRead;
-    setter(prev => ({ ...prev, image: null, imageFile: null }));
+    setter(prev => ({ ...prev, image: null, imageFile: null, imageBase64: null, imageMime: null }));
   };
 
-  // Excel import
   const handleHubFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setHubFile(file.name);
-
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
@@ -135,7 +144,6 @@ const PulseMeter = () => {
         const ws = wb.Sheets[wb.SheetNames[0]];
         const json: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true });
 
-        // Find header row
         let headerIdx = -1;
         for (let i = 0; i < Math.min(json.length, 20); i++) {
           const row = (json[i] || []).map((c: any) => String(c).toLowerCase());
@@ -146,8 +154,7 @@ const PulseMeter = () => {
         }
 
         if (headerIdx === -1) {
-          // Try to find any numeric data rows
-          toast.error("Could not find expected columns in the file. Please enter values manually.");
+          toast.error("Could not find expected columns. Please enter values manually.");
           return;
         }
 
@@ -172,7 +179,6 @@ const PulseMeter = () => {
           if (!row || row.length === 0) continue;
           const load = row[loadCol] != null ? String(row[loadCol]).trim() : "";
           if (!load) continue;
-
           rows.push({
             load,
             dateFirst: dateFirstCol >= 0 && row[dateFirstCol] ? String(row[dateFirstCol]) : "",
@@ -192,7 +198,6 @@ const PulseMeter = () => {
           toast.error("No data rows found in the file.");
           return;
         }
-
         setHubRows(rows);
         setSelectedHubRow(0);
         toast.success(`Imported ${rows.length} row(s) from ${file.name}`);
@@ -203,40 +208,69 @@ const PulseMeter = () => {
     reader.readAsArrayBuffer(file);
   }, []);
 
-  // Copy to clipboard
+  const handleSave = async () => {
+    if (!user) {
+      navigate("/auth");
+      return;
+    }
+    setIsSaving(true);
+    try {
+      const payload = {
+        user_id: user.id,
+        name: validationName,
+        status: "draft",
+        readings: [] as any[],
+        settings: { ...siteInfo, meterMode: mode, toolType: "pulse" },
+        validation_data: {
+          firstRead: { dateTime: firstRead.dateTime, reading: firstRead.reading, imageBase64: firstRead.imageBase64, imageMime: firstRead.imageMime },
+          secondRead: { dateTime: secondRead.dateTime, reading: secondRead.reading, imageBase64: secondRead.imageBase64, imageMime: secondRead.imageMime },
+          hubRows,
+          selectedHubRow,
+          manualHubCount,
+          manualFactor,
+          overrideFirstRead,
+          overrideSecondRead,
+          overrideHubCount,
+          overrideFactor,
+          comments,
+          accuracy,
+          status: status.label,
+        },
+        comparison_data: [] as any[],
+        bravegen_raw_data: [] as any[],
+      };
+      const { error } = await supabase.from("validations").insert(payload);
+      if (error) throw error;
+      toast.success("Validation saved to your account");
+    } catch (err: any) {
+      toast.error("Failed to save: " + err.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleCopyToClipboard = () => {
     const lines = [
       `Pulse Meter Validation Report`,
       `Mode: ${mode === "water" ? "Water" : "Gas"}`,
-      ``,
-      `Site Info`,
-      `Feed: ${siteInfo.feed}`,
-      `Serial Number: ${siteInfo.serialNumber}`,
-      `Site: ${siteInfo.site}`,
-      `Building: ${siteInfo.building}`,
-      ``,
-      `Physical Meter Readings`,
-      `First Read Date: ${firstRead.dateTime}`,
-      `First Read (${unit}): ${firstRead.reading}`,
-      `Second Read Date: ${secondRead.dateTime}`,
-      `Second Read (${unit}): ${secondRead.reading}`,
+      ``, `Site Info`,
+      `Feed: ${siteInfo.feed}`, `Serial Number: ${siteInfo.serialNumber}`,
+      `Site: ${siteInfo.site}`, `Building: ${siteInfo.building}`,
+      ``, `Physical Meter Readings`,
+      `First Read Date: ${firstRead.dateTime}`, `First Read (${unit}): ${firstRead.reading}`,
+      `Second Read Date: ${secondRead.dateTime}`, `Second Read (${unit}): ${secondRead.reading}`,
       `Physical Difference (${unit}): ${physicalDiff.toFixed(4)}`,
-      ``,
-      `BraveGen Hub Data`,
+      ``, `BraveGen Hub Data`,
       `Load: ${activeHubRow?.load || "Manual Entry"}`,
-      `Hub Pulse Count: ${hubCount}`,
-      `Pulse Factor: ${factor}`,
+      `Hub Pulse Count: ${hubCount}`, `Pulse Factor: ${factor}`,
       `Hub Volume (${unit}): ${hubVolume.toFixed(4)}`,
-      ``,
-      `Accuracy: ${accuracy.toFixed(2)}% — ${status.label}`,
-      ``,
-      `Comments: ${comments}`,
+      ``, `Accuracy: ${accuracy.toFixed(2)}% — ${status.label}`,
+      ``, `Comments: ${comments}`,
     ];
     navigator.clipboard.writeText(lines.join("\n"));
     toast.success("Copied to clipboard");
   };
 
-  // Mode change updates default factor
   const handleModeChange = (m: MeterMode) => {
     setMode(m);
     if (!overrideFactor && !activeHubRow) {
@@ -244,69 +278,88 @@ const PulseMeter = () => {
     }
   };
 
-  const hubInputRef = useRef<HTMLInputElement>(null);
-
   return (
-    <div className="min-h-screen" style={{ background: "#F0F5F7" }}>
-      {/* Header */}
-      <header className="sticky top-0 z-50 border-b" style={{ background: "#0D6E6E", borderColor: "#0A5A5A" }}>
-        <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
+    <div className="min-h-screen bg-background">
+      {/* Header — same as electricity tool */}
+      <header className="border-b border-border bg-card">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-3">
-            <ModeIcon className="h-7 w-7 text-white" />
-            <h1 className="text-xl font-bold text-white tracking-tight">Pulse Meter Validation</h1>
+            <img src={bravegenLogo} alt="BraveGen" className="h-10" />
+            <div className="hidden sm:block">
+              <h1 className="text-xl font-bold text-foreground tracking-tight">
+                Pulse Meter Validation
+              </h1>
+              <p className="text-xs text-muted-foreground">
+                Water · Gas · Validate
+              </p>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             {/* Mode toggle */}
-            <Button
-              size="sm"
-              variant={mode === "water" ? "default" : "outline"}
-              onClick={() => handleModeChange("water")}
-              className={mode === "water" ? "bg-[#00BFA5] hover:bg-[#00A896] text-white border-none" : "text-white border-white/30 hover:bg-white/10"}
-            >
-              <Droplets className="h-4 w-4 mr-1" /> Water
-            </Button>
-            <Button
-              size="sm"
-              variant={mode === "gas" ? "default" : "outline"}
-              onClick={() => handleModeChange("gas")}
-              className={mode === "gas" ? "bg-[#F59E0B] hover:bg-[#D97706] text-white border-none" : "text-white border-white/30 hover:bg-white/10"}
-            >
-              <Flame className="h-4 w-4 mr-1" /> Gas
-            </Button>
-            {/* Nav */}
-            <Button size="sm" variant="outline" className="text-white border-white/30 hover:bg-white/10 ml-2" onClick={() => navigate("/electricitytool")}>
-              <Zap className="h-4 w-4 mr-1" /> Electricity Tool
-            </Button>
+            <div className="flex items-center rounded-md border border-border overflow-hidden">
+              <button
+                onClick={() => handleModeChange("water")}
+                className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium transition-colors ${mode === "water" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:text-foreground"}`}
+              >
+                <Droplets className="h-3.5 w-3.5" /> Water
+              </button>
+              <button
+                onClick={() => handleModeChange("gas")}
+                className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium transition-colors ${mode === "gas" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:text-foreground"}`}
+              >
+                <Flame className="h-3.5 w-3.5" /> Gas
+              </button>
+            </div>
+            {user ? (
+              <Button variant="outline" size="sm" onClick={() => navigate("/dashboard")} className="gap-1.5">
+                <LayoutDashboard className="h-3.5 w-3.5" /> Dashboard
+              </Button>
+            ) : (
+              <Button variant="outline" size="sm" onClick={() => navigate("/auth")} className="gap-1.5">
+                <LogIn className="h-3.5 w-3.5" /> Sign In
+              </Button>
+            )}
           </div>
         </div>
       </header>
 
-      {/* Wave divider */}
-      <svg viewBox="0 0 1440 40" className="w-full -mb-1" style={{ color: "#0D6E6E" }}>
-        <path d="M0,20 C360,40 720,0 1080,20 C1260,30 1360,25 1440,20 L1440,0 L0,0 Z" fill="currentColor" />
-      </svg>
+      <main className="mx-auto max-w-7xl space-y-6 px-6 py-8">
+        {/* Validation Name (when signed in) */}
+        {user && (
+          <div className="flex items-center gap-3">
+            <Input
+              value={validationName}
+              onChange={e => setValidationName(e.target.value)}
+              className="text-lg font-semibold bg-transparent border-none px-0 focus-visible:ring-0 max-w-md"
+              placeholder="Validation name..."
+            />
+            <Button onClick={handleSave} disabled={isSaving} size="sm" className="gap-1.5">
+              {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+              Save
+            </Button>
+          </div>
+        )}
 
-      <main className="max-w-5xl mx-auto px-4 py-6 space-y-6">
         {/* Site Info */}
         <Collapsible open={siteInfoOpen} onOpenChange={setSiteInfoOpen}>
-          <Card style={{ borderColor: "#D1DEE6" }} className="bg-white">
+          <Card>
             <CollapsibleTrigger asChild>
               <CardHeader className="cursor-pointer flex-row items-center justify-between py-3">
-                <CardTitle className="text-base font-semibold" style={{ color: "#2D4A5E" }}>
-                  <Gauge className="inline h-4 w-4 mr-2" />Site Information
+                <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  <Gauge className="h-4 w-4 text-primary" /> Site Information
                 </CardTitle>
-                {siteInfoOpen ? <ChevronUp className="h-4 w-4" style={{ color: "#2D4A5E" }} /> : <ChevronDown className="h-4 w-4" style={{ color: "#2D4A5E" }} />}
+                {siteInfoOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
               </CardHeader>
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-0">
                 {(["feed", "serialNumber", "site", "building"] as const).map(key => (
                   <div key={key}>
-                    <Label className="text-xs" style={{ color: "#2D4A5E" }}>{key === "serialNumber" ? "Serial Number" : key.charAt(0).toUpperCase() + key.slice(1)}</Label>
+                    <Label className="text-xs text-muted-foreground">{key === "serialNumber" ? "Serial Number" : key.charAt(0).toUpperCase() + key.slice(1)}</Label>
                     <Input
                       value={siteInfo[key]}
                       onChange={e => setSiteInfo(prev => ({ ...prev, [key]: e.target.value }))}
-                      className="mt-1 bg-white border-[#D1DEE6] text-[#2D4A5E] focus-visible:ring-[#00BFA5]"
+                      className="mt-1"
                       placeholder={key === "feed" ? "e.g. OKO" : key === "serialNumber" ? "e.g. O9824474" : key === "site" ? "e.g. 505 Mt Wellington Highway" : "e.g. J.A.Russels"}
                     />
                   </div>
@@ -317,10 +370,10 @@ const PulseMeter = () => {
         </Collapsible>
 
         {/* Section 1: Physical Meter Readings */}
-        <Card style={{ borderColor: "#D1DEE6" }} className="bg-white">
+        <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base font-semibold" style={{ color: "#2D4A5E" }}>
-              <Camera className="inline h-4 w-4 mr-2" />Physical Meter Readings
+            <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <Camera className="h-4 w-4 text-primary" /> Physical Meter Readings
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -331,145 +384,100 @@ const PulseMeter = () => {
                 const ref = which === "first" ? firstInputRef : secondInputRef;
                 return (
                   <div key={which} className="space-y-3">
-                    <p className="text-sm font-medium" style={{ color: "#0D6E6E" }}>{which === "first" ? "First Read" : "Second Read"}</p>
-                    {/* Image drop zone */}
+                    <p className="text-sm font-medium text-primary">{which === "first" ? "First Read" : "Second Read"}</p>
                     <div
-                      className="relative rounded-lg border-2 border-dashed flex items-center justify-center overflow-hidden cursor-pointer transition-colors"
-                      style={{ borderColor: read.image ? "#00BFA5" : "#D1DEE6", height: 180, background: read.image ? "transparent" : "#F7FAFA" }}
+                      className={`relative rounded-lg border-2 border-dashed flex items-center justify-center overflow-hidden cursor-pointer transition-colors h-44
+                        ${read.image ? "border-primary" : "border-border bg-surface hover:border-primary/50"}`}
                       onDragOver={e => e.preventDefault()}
                       onDrop={handleImageDrop(which)}
-                      onClick={() => {
-                        if (!read.image) ref.current?.click();
-                      }}
+                      onClick={() => { if (!read.image) ref.current?.click(); }}
                     >
                       <input ref={ref} type="file" accept="image/*" className="hidden" onChange={handleImageSelect(which)} />
                       {read.image ? (
                         <>
-                          <img
-                            src={read.image}
-                            alt="Meter"
-                            className="w-full h-full object-cover cursor-zoom-in"
-                            onClick={(e) => { e.stopPropagation(); setLightboxImage(read.image); }}
-                          />
-                          <button
-                            onClick={(e) => { e.stopPropagation(); removeImage(which); }}
-                            className="absolute top-1 right-1 rounded-full p-1 bg-white/80 hover:bg-white shadow"
-                          >
-                            <X className="h-4 w-4 text-red-500" />
+                          <img src={read.image} alt="Meter" className="w-full h-full object-cover cursor-zoom-in" onClick={e => { e.stopPropagation(); setLightboxImage(read.image); }} />
+                          <button onClick={e => { e.stopPropagation(); removeImage(which); }} className="absolute top-1 right-1 rounded-full p-1 bg-background/80 hover:bg-background shadow">
+                            <X className="h-4 w-4 text-destructive" />
                           </button>
                         </>
                       ) : (
-                        <div className="text-center" style={{ color: "#2D4A5E" }}>
+                        <div className="text-center text-muted-foreground">
                           <Camera className="h-8 w-8 mx-auto mb-1 opacity-40" />
                           <p className="text-xs opacity-60">Drop meter photo here</p>
                         </div>
                       )}
                     </div>
                     <div>
-                      <Label className="text-xs" style={{ color: "#2D4A5E" }}>Reading Date & Time</Label>
-                      <Input
-                        type="datetime-local"
-                        value={read.dateTime}
-                        onChange={e => setRead(prev => ({ ...prev, dateTime: e.target.value }))}
-                        className="mt-1 bg-white border-[#D1DEE6] text-[#2D4A5E] focus-visible:ring-[#00BFA5]"
-                      />
+                      <Label className="text-xs text-muted-foreground">Reading Date & Time</Label>
+                      <Input type="datetime-local" value={read.dateTime} onChange={e => setRead(prev => ({ ...prev, dateTime: e.target.value }))} className="mt-1" />
                     </div>
                     <div>
-                      <Label className="text-xs" style={{ color: "#2D4A5E" }}>Meter Reading ({unit})</Label>
-                      <Input
-                        type="number"
-                        step="any"
-                        value={read.reading}
-                        onChange={e => setRead(prev => ({ ...prev, reading: e.target.value }))}
-                        className="mt-1 bg-white border-[#D1DEE6] text-[#2D4A5E] focus-visible:ring-[#00BFA5]"
-                        placeholder="e.g. 5835.85"
-                      />
+                      <Label className="text-xs text-muted-foreground">Meter Reading ({unit})</Label>
+                      <Input type="number" step="any" value={read.reading} onChange={e => setRead(prev => ({ ...prev, reading: e.target.value }))} className="mt-1" placeholder="e.g. 5835.85" />
                     </div>
                   </div>
                 );
               })}
             </div>
-            {/* Difference */}
             {(firstRead.reading && secondRead.reading) && (
-              <div className="mt-4 rounded-lg p-3 text-center" style={{ background: "#E6F7F5" }}>
-                <p className="text-sm" style={{ color: "#2D4A5E" }}>Physical Meter Difference</p>
-                <p className="text-2xl font-bold" style={{ color: "#0D6E6E" }}>{physicalDiff.toFixed(4)} {unit}</p>
+              <div className="mt-4 rounded-lg p-3 text-center bg-surface">
+                <p className="text-sm text-muted-foreground">Physical Meter Difference</p>
+                <p className="text-2xl font-bold text-primary">{physicalDiff.toFixed(4)} {unit}</p>
               </div>
             )}
           </CardContent>
         </Card>
 
         {/* Section 2: BraveGen Hub Data */}
-        <Card style={{ borderColor: "#D1DEE6" }} className="bg-white">
+        <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base font-semibold" style={{ color: "#2D4A5E" }}>
-              <FileSpreadsheet className="inline h-4 w-4 mr-2" />BraveGen Hub Data
+            <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <FileSpreadsheet className="h-4 w-4 text-primary" /> BraveGen Hub Data
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* File upload */}
             <div
-              className="rounded-lg border-2 border-dashed p-6 text-center cursor-pointer transition-colors"
-              style={{ borderColor: "#D1DEE6", background: "#F7FAFA" }}
+              className="rounded-lg border-2 border-dashed p-6 text-center cursor-pointer border-border bg-surface hover:border-primary/50 transition-colors"
               onClick={() => hubInputRef.current?.click()}
             >
               <input ref={hubInputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleHubFileUpload} />
-              <Upload className="h-8 w-8 mx-auto mb-2" style={{ color: "#00BFA5" }} />
-              <p className="text-sm" style={{ color: "#2D4A5E" }}>{hubFile ? hubFile : "Drop or click to upload BraveGen export (.xlsx, .csv)"}</p>
+              <Upload className="h-8 w-8 mx-auto mb-2 text-primary" />
+              <p className="text-sm text-muted-foreground">{hubFile ? hubFile : "Drop or click to upload BraveGen export (.xlsx, .csv)"}</p>
             </div>
 
-            {/* Imported data */}
             {hubRows.length > 0 && (
               <div className="space-y-3">
                 {hubRows.length > 1 && (
                   <div>
-                    <Label className="text-xs" style={{ color: "#2D4A5E" }}>Select Row</Label>
+                    <Label className="text-xs text-muted-foreground">Select Row</Label>
                     <Select value={String(selectedHubRow)} onValueChange={v => setSelectedHubRow(Number(v))}>
-                      <SelectTrigger className="mt-1 bg-white border-[#D1DEE6] text-[#2D4A5E]">
-                        <SelectValue />
-                      </SelectTrigger>
+                      <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        {hubRows.map((r, i) => (
-                          <SelectItem key={i} value={String(i)}>{r.load}</SelectItem>
-                        ))}
+                        {hubRows.map((r, i) => <SelectItem key={i} value={String(i)}>{r.load}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
                 )}
                 {activeHubRow && (
-                  <div className="rounded-lg p-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm" style={{ background: "#E6F7F5" }}>
-                    <div><span className="text-xs opacity-60" style={{ color: "#2D4A5E" }}>Load</span><p className="font-medium" style={{ color: "#0D6E6E" }}>{activeHubRow.load}</p></div>
-                    <div><span className="text-xs opacity-60" style={{ color: "#2D4A5E" }}>Hub Count</span><p className="font-medium" style={{ color: "#0D6E6E" }}>{activeHubRow.hubCount ?? "—"}</p></div>
-                    <div><span className="text-xs opacity-60" style={{ color: "#2D4A5E" }}>Factor</span><p className="font-medium" style={{ color: "#0D6E6E" }}>{activeHubRow.factor ?? "—"}</p></div>
-                    <div><span className="text-xs opacity-60" style={{ color: "#2D4A5E" }}>Hub Volume</span><p className="font-medium" style={{ color: "#0D6E6E" }}>{activeHubRow.hubVolume != null ? activeHubRow.hubVolume.toFixed(4) : "—"} {unit}</p></div>
+                  <div className="rounded-lg p-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm bg-surface">
+                    <div><span className="text-xs text-muted-foreground">Load</span><p className="font-medium text-foreground">{activeHubRow.load}</p></div>
+                    <div><span className="text-xs text-muted-foreground">Hub Count</span><p className="font-medium text-foreground">{activeHubRow.hubCount ?? "—"}</p></div>
+                    <div><span className="text-xs text-muted-foreground">Factor</span><p className="font-medium text-foreground">{activeHubRow.factor ?? "—"}</p></div>
+                    <div><span className="text-xs text-muted-foreground">Hub Volume</span><p className="font-medium text-foreground">{activeHubRow.hubVolume != null ? activeHubRow.hubVolume.toFixed(4) : "—"} {unit}</p></div>
                   </div>
                 )}
               </div>
             )}
 
-            {/* Manual entry */}
             {hubRows.length === 0 && (
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label className="text-xs" style={{ color: "#2D4A5E" }}>Hub Pulse Count</Label>
-                  <Input
-                    type="number"
-                    value={manualHubCount}
-                    onChange={e => setManualHubCount(e.target.value)}
-                    className="mt-1 bg-white border-[#D1DEE6] text-[#2D4A5E] focus-visible:ring-[#00BFA5]"
-                    placeholder="e.g. 1270"
-                  />
+                  <Label className="text-xs text-muted-foreground">Hub Pulse Count</Label>
+                  <Input type="number" value={manualHubCount} onChange={e => setManualHubCount(e.target.value)} className="mt-1" placeholder="e.g. 1270" />
                 </div>
                 <div>
-                  <Label className="text-xs" style={{ color: "#2D4A5E" }}>Pulse Factor ({unit}/pulse)</Label>
-                  <Input
-                    type="number"
-                    step="any"
-                    value={manualFactor}
-                    onChange={e => setManualFactor(e.target.value)}
-                    className="mt-1 bg-white border-[#D1DEE6] text-[#2D4A5E] focus-visible:ring-[#00BFA5]"
-                    placeholder={mode === "water" ? "0.005" : "0.3"}
-                  />
+                  <Label className="text-xs text-muted-foreground">Pulse Factor ({unit}/pulse)</Label>
+                  <Input type="number" step="any" value={manualFactor} onChange={e => setManualFactor(e.target.value)} className="mt-1" placeholder={mode === "water" ? "0.005" : "0.3"} />
                 </div>
               </div>
             )}
@@ -477,48 +485,39 @@ const PulseMeter = () => {
         </Card>
 
         {/* Section 3: Validation Result */}
-        <Card style={{ borderColor: "#D1DEE6" }} className="bg-white">
+        <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base font-semibold" style={{ color: "#2D4A5E" }}>Validation Result</CardTitle>
+            <CardTitle className="text-sm font-semibold text-foreground">Validation Result</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Override inputs */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div>
-                <Label className="text-xs" style={{ color: "#2D4A5E" }}>First Read ({unit})</Label>
-                <Input type="number" step="any" value={overrideFirstRead || firstRead.reading} onChange={e => setOverrideFirstRead(e.target.value)}
-                  className="mt-1 bg-white border-[#D1DEE6] text-[#2D4A5E] focus-visible:ring-[#00BFA5] text-sm" />
+                <Label className="text-xs text-muted-foreground">First Read ({unit})</Label>
+                <Input type="number" step="any" value={overrideFirstRead || firstRead.reading} onChange={e => setOverrideFirstRead(e.target.value)} className="mt-1 text-sm" />
               </div>
               <div>
-                <Label className="text-xs" style={{ color: "#2D4A5E" }}>Second Read ({unit})</Label>
-                <Input type="number" step="any" value={overrideSecondRead || secondRead.reading} onChange={e => setOverrideSecondRead(e.target.value)}
-                  className="mt-1 bg-white border-[#D1DEE6] text-[#2D4A5E] focus-visible:ring-[#00BFA5] text-sm" />
+                <Label className="text-xs text-muted-foreground">Second Read ({unit})</Label>
+                <Input type="number" step="any" value={overrideSecondRead || secondRead.reading} onChange={e => setOverrideSecondRead(e.target.value)} className="mt-1 text-sm" />
               </div>
               <div>
-                <Label className="text-xs" style={{ color: "#2D4A5E" }}>Hub Count</Label>
-                <Input type="number" value={overrideHubCount || (activeHubRow ? String(activeHubRow.hubCount ?? "") : manualHubCount)}
-                  onChange={e => setOverrideHubCount(e.target.value)}
-                  className="mt-1 bg-white border-[#D1DEE6] text-[#2D4A5E] focus-visible:ring-[#00BFA5] text-sm" />
+                <Label className="text-xs text-muted-foreground">Hub Count</Label>
+                <Input type="number" value={overrideHubCount || (activeHubRow ? String(activeHubRow.hubCount ?? "") : manualHubCount)} onChange={e => setOverrideHubCount(e.target.value)} className="mt-1 text-sm" />
               </div>
               <div>
-                <Label className="text-xs" style={{ color: "#2D4A5E" }}>Factor</Label>
-                <Input type="number" step="any" value={overrideFactor || (activeHubRow ? String(activeHubRow.factor ?? "") : manualFactor)}
-                  onChange={e => setOverrideFactor(e.target.value)}
-                  className="mt-1 bg-white border-[#D1DEE6] text-[#2D4A5E] focus-visible:ring-[#00BFA5] text-sm" />
+                <Label className="text-xs text-muted-foreground">Factor</Label>
+                <Input type="number" step="any" value={overrideFactor || (activeHubRow ? String(activeHubRow.factor ?? "") : manualFactor)} onChange={e => setOverrideFactor(e.target.value)} className="mt-1 text-sm" />
               </div>
             </div>
 
-            {/* Result display */}
             {physicalDiff > 0 && hubCount > 0 && (
               <>
-                <div className="rounded-xl p-6 text-center" style={{ background: "linear-gradient(135deg, #E6F7F5, #F0F5F7)" }}>
-                  <p className="text-sm mb-1" style={{ color: "#2D4A5E" }}>Accuracy</p>
-                  <p className="text-5xl font-bold mb-2" style={{ color: "#0D6E6E" }}>{accuracy.toFixed(2)}%</p>
+                <div className="rounded-xl p-6 text-center bg-surface">
+                  <p className="text-sm mb-1 text-muted-foreground">Accuracy</p>
+                  <p className="text-5xl font-bold mb-2 text-primary">{accuracy.toFixed(2)}%</p>
                   <Badge className={`${status.color} text-sm px-3 py-1`}>{status.label}</Badge>
                 </div>
 
-                {/* Summary table */}
-                <div className="rounded-lg overflow-hidden border" style={{ borderColor: "#D1DEE6" }}>
+                <div className="rounded-lg overflow-hidden border border-border">
                   <table className="w-full text-sm">
                     <tbody>
                       {[
@@ -533,9 +532,9 @@ const PulseMeter = () => {
                         [`Hub Volume (${unit})`, hubVolume.toFixed(4)],
                         ["Accuracy", `${accuracy.toFixed(2)}% — ${status.label}`],
                       ].map(([label, value], i) => (
-                        <tr key={label} style={{ background: i % 2 === 0 ? "#F7FAFA" : "#FFFFFF" }}>
-                          <td className="px-4 py-2 font-medium" style={{ color: "#2D4A5E" }}>{label}</td>
-                          <td className="px-4 py-2 text-right" style={{ color: "#0D6E6E" }}>{value}</td>
+                        <tr key={label} className={i % 2 === 0 ? "bg-surface" : "bg-card"}>
+                          <td className="px-4 py-2 font-medium text-muted-foreground">{label}</td>
+                          <td className="px-4 py-2 text-right text-foreground">{value}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -547,31 +546,31 @@ const PulseMeter = () => {
         </Card>
 
         {/* Comments */}
-        <Card style={{ borderColor: "#D1DEE6" }} className="bg-white">
+        <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base font-semibold" style={{ color: "#2D4A5E" }}>Comments / Summary</CardTitle>
+            <CardTitle className="text-sm font-semibold text-foreground">Comments / Summary</CardTitle>
           </CardHeader>
           <CardContent>
-            <Textarea
-              value={comments}
-              onChange={e => setComments(e.target.value)}
-              placeholder="e.g. Bravegen data logger collecting pulses accurately at 99%"
-              className="bg-white border-[#D1DEE6] text-[#2D4A5E] focus-visible:ring-[#00BFA5] min-h-[80px]"
-            />
+            <Textarea value={comments} onChange={e => setComments(e.target.value)} placeholder="e.g. Bravegen data logger collecting pulses accurately at 99%" className="min-h-[80px]" />
           </CardContent>
         </Card>
 
-        {/* Export */}
+        {/* Actions */}
         <div className="flex gap-3 pb-8">
-          <Button onClick={handleCopyToClipboard} style={{ background: "#0D6E6E" }} className="text-white hover:opacity-90">
-            <Copy className="h-4 w-4 mr-2" /> Copy to Clipboard
+          <Button onClick={handleCopyToClipboard} className="gap-2">
+            <Copy className="h-4 w-4" /> Copy to Clipboard
           </Button>
+          {!user && (
+            <Button variant="outline" onClick={() => navigate("/auth")} className="gap-2">
+              <Save className="h-4 w-4" /> Sign In to Save
+            </Button>
+          )}
         </div>
       </main>
 
       {/* Lightbox */}
       <Dialog open={!!lightboxImage} onOpenChange={() => setLightboxImage(null)}>
-        <DialogContent className="max-w-3xl p-2 bg-black/90 border-none">
+        <DialogContent className="max-w-3xl p-2 bg-background border-border">
           {lightboxImage && <img src={lightboxImage} alt="Meter reading" className="w-full h-auto rounded" />}
         </DialogContent>
       </Dialog>
