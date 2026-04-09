@@ -81,7 +81,7 @@ const PulseMeter = () => {
   const hubInputRef = useRef<HTMLInputElement>(null);
 
   const unit = mode === "water" ? "m³" : "NcM";
-  const ModeIcon = mode === "water" ? Droplets : Flame;
+  
 
   const r1 = parseFloat(overrideFirstRead || firstRead.reading) || 0;
   const r2 = parseFloat(overrideSecondRead || secondRead.reading) || 0;
@@ -239,7 +239,7 @@ const PulseMeter = () => {
         comparison_data: [] as any[],
         bravegen_raw_data: [] as any[],
       };
-      const { error } = await supabase.from("validations").insert(payload);
+      const { error } = await supabase.from("validations").insert([payload]);
       if (error) throw error;
       toast.success("Validation saved to your account");
     } catch (err: any) {

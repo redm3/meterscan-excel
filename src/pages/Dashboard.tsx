@@ -17,7 +17,7 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
-import { Plus, Search, LogOut, FileText, Trash2, Download, Loader2, ClipboardList, Zap, Droplets, Flame } from "lucide-react";
+import { Plus, Search, LogOut, Trash2, Download, Loader2, ClipboardList, Zap, Droplets, Flame } from "lucide-react";
 import { generateValidationExcel } from "@/lib/excelGenerator";
 
 interface SavedValidation {
