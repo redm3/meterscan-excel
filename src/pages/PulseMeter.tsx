@@ -221,7 +221,7 @@ const PulseMeter = () => {
         status: "draft",
         readings: [] as any[],
         settings: { ...siteInfo, meterMode: mode, toolType: "pulse" },
-        validation_data: {
+        validation_data: JSON.parse(JSON.stringify({
           firstRead: { dateTime: firstRead.dateTime, reading: firstRead.reading, imageBase64: firstRead.imageBase64, imageMime: firstRead.imageMime },
           secondRead: { dateTime: secondRead.dateTime, reading: secondRead.reading, imageBase64: secondRead.imageBase64, imageMime: secondRead.imageMime },
           hubRows,
@@ -235,7 +235,7 @@ const PulseMeter = () => {
           comments,
           accuracy,
           status: status.label,
-        },
+        })),
         comparison_data: [] as any[],
         bravegen_raw_data: [] as any[],
       };
