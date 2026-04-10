@@ -66,6 +66,8 @@ const PulseMeter = () => {
   const [hubRows, setHubRows] = useState<HubRow[]>([]);
   const [selectedHubRow, setSelectedHubRow] = useState<number>(0);
   const [manualHubCount, setManualHubCount] = useState("");
+  const [manualPulseCount1, setManualPulseCount1] = useState("");
+  const [manualPulseCount2, setManualPulseCount2] = useState("");
   const [manualFactor, setManualFactor] = useState(String(DEFAULT_FACTORS["water"]));
 
   const [overrideFirstRead, setOverrideFirstRead] = useState("");
@@ -88,7 +90,11 @@ const PulseMeter = () => {
   const physicalDiff = r2 - r1;
 
   const activeHubRow = hubRows[selectedHubRow] || null;
-  const hubCount = parseFloat(overrideHubCount || (activeHubRow ? String(activeHubRow.hubCount ?? "") : manualHubCount)) || 0;
+  const pc1 = parseFloat(manualPulseCount1) || 0;
+  const pc2 = parseFloat(manualPulseCount2) || 0;
+  const calculatedPulseDiff = pc1 > 0 || pc2 > 0 ? pc2 - pc1 : 0;
+  const effectiveManualHubCount = manualHubCount || (calculatedPulseDiff !== 0 ? String(calculatedPulseDiff) : "");
+  const hubCount = parseFloat(overrideHubCount || (activeHubRow ? String(activeHubRow.hubCount ?? "") : effectiveManualHubCount)) || 0;
   const factor = parseFloat(overrideFactor || (activeHubRow ? String(activeHubRow.factor ?? "") : manualFactor)) || 0;
   const hubVolume = hubCount * factor;
   const accuracy = physicalDiff !== 0 ? (hubVolume / physicalDiff) * 100 : 0;
@@ -470,14 +476,26 @@ const PulseMeter = () => {
             )}
 
             {hubRows.length === 0 && (
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-xs text-muted-foreground">Hub Pulse Count</Label>
-                  <Input type="number" value={manualHubCount} onChange={e => setManualHubCount(e.target.value)} className="mt-1" placeholder="e.g. 1270" />
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Pulse Count 1</Label>
+                    <Input type="number" value={manualPulseCount1} onChange={e => { setManualPulseCount1(e.target.value); setManualHubCount(""); }} className="mt-1" placeholder="e.g. 0" />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Pulse Count 2</Label>
+                    <Input type="number" value={manualPulseCount2} onChange={e => { setManualPulseCount2(e.target.value); setManualHubCount(""); }} className="mt-1" placeholder="e.g. 1270" />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Hub Pulse Count (Diff)</Label>
+                    <Input type="number" value={manualHubCount || (calculatedPulseDiff !== 0 ? String(calculatedPulseDiff) : "")} onChange={e => setManualHubCount(e.target.value)} className="mt-1" placeholder="Auto or manual" />
+                  </div>
                 </div>
-                <div>
-                  <Label className="text-xs text-muted-foreground">Pulse Factor ({unit}/pulse)</Label>
-                  <Input type="number" step="any" value={manualFactor} onChange={e => setManualFactor(e.target.value)} className="mt-1" placeholder={mode === "water" ? "0.005" : "0.3"} />
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Pulse Factor ({unit}/pulse)</Label>
+                    <Input type="number" step="any" value={manualFactor} onChange={e => setManualFactor(e.target.value)} className="mt-1" placeholder={mode === "water" ? "0.005" : "0.3"} />
+                  </div>
                 </div>
               </div>
             )}
