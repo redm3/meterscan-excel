@@ -1,5 +1,5 @@
-import { useState, useCallback, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useCallback, useRef, useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Droplets, Flame, Camera, X, Upload, FileSpreadsheet, ChevronDown, ChevronUp, Copy, Gauge, LogIn, LayoutDashboard, Save, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,14 +53,18 @@ const DEFAULT_FACTORS: Record<MeterMode, number> = { water: 0.005, gas: 0.3 };
 const PulseMeter = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [mode, setMode] = useState<MeterMode>("water");
   const [siteInfoOpen, setSiteInfoOpen] = useState(true);
   const [siteInfo, setSiteInfo] = useState<SiteInfo>({ feed: "", serialNumber: "", site: "", building: "" });
   const [isSaving, setIsSaving] = useState(false);
+  const [currentValidationId, setCurrentValidationId] = useState<string | null>(null);
 
   const [firstRead, setFirstRead] = useState<MeterRead>({ image: null, imageFile: null, imageBase64: null, imageMime: null, dateTime: "", reading: "" });
   const [secondRead, setSecondRead] = useState<MeterRead>({ image: null, imageFile: null, imageBase64: null, imageMime: null, dateTime: "", reading: "" });
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+  const [extractingFirst, setExtractingFirst] = useState(false);
+  const [extractingSecond, setExtractingSecond] = useState(false);
 
   const [hubFile, setHubFile] = useState<string | null>(null);
   const [hubRows, setHubRows] = useState<HubRow[]>([]);
@@ -83,7 +87,83 @@ const PulseMeter = () => {
   const hubInputRef = useRef<HTMLInputElement>(null);
 
   const unit = mode === "water" ? "m³" : "NcM";
-  
+
+  // Load saved validation from URL params
+  useEffect(() => {
+    const validationId = searchParams.get("validation");
+    if (!validationId) return;
+
+    const loadValidation = async () => {
+      const { data, error } = await supabase
+        .from("validations")
+        .select("*")
+        .eq("id", validationId)
+        .single();
+
+      if (error || !data) {
+        toast.error("Failed to load validation");
+        return;
+      }
+
+      setCurrentValidationId(data.id);
+      setValidationName(data.name || "Untitled Pulse Validation");
+
+      const settings = data.settings as any;
+      if (settings) {
+        setSiteInfo({
+          feed: settings.feed || "",
+          serialNumber: settings.serialNumber || "",
+          site: settings.site || "",
+          building: settings.building || "",
+        });
+        if (settings.meterMode === "gas" || settings.meterMode === "water") {
+          setMode(settings.meterMode);
+        }
+      }
+
+      const vd = data.validation_data as any;
+      if (vd) {
+        // Restore first read
+        if (vd.firstRead) {
+          const fr = vd.firstRead;
+          setFirstRead({
+            image: fr.imageBase64 ? `data:${fr.imageMime || "image/jpeg"};base64,${fr.imageBase64}` : null,
+            imageFile: null,
+            imageBase64: fr.imageBase64 || null,
+            imageMime: fr.imageMime || null,
+            dateTime: fr.dateTime || "",
+            reading: fr.reading || "",
+          });
+        }
+        // Restore second read
+        if (vd.secondRead) {
+          const sr = vd.secondRead;
+          setSecondRead({
+            image: sr.imageBase64 ? `data:${sr.imageMime || "image/jpeg"};base64,${sr.imageBase64}` : null,
+            imageFile: null,
+            imageBase64: sr.imageBase64 || null,
+            imageMime: sr.imageMime || null,
+            dateTime: sr.dateTime || "",
+            reading: sr.reading || "",
+          });
+        }
+        // Restore hub data
+        if (vd.hubRows) setHubRows(vd.hubRows);
+        if (vd.selectedHubRow != null) setSelectedHubRow(vd.selectedHubRow);
+        if (vd.manualHubCount) setManualHubCount(vd.manualHubCount);
+        if (vd.manualPulseCount1) setManualPulseCount1(vd.manualPulseCount1);
+        if (vd.manualPulseCount2) setManualPulseCount2(vd.manualPulseCount2);
+        if (vd.manualFactor) setManualFactor(vd.manualFactor);
+        if (vd.overrideFirstRead) setOverrideFirstRead(vd.overrideFirstRead);
+        if (vd.overrideSecondRead) setOverrideSecondRead(vd.overrideSecondRead);
+        if (vd.overrideHubCount) setOverrideHubCount(vd.overrideHubCount);
+        if (vd.overrideFactor) setOverrideFactor(vd.overrideFactor);
+        if (vd.comments) setComments(vd.comments);
+      }
+    };
+
+    loadValidation();
+  }, [searchParams]);
 
   const r1 = parseFloat(overrideFirstRead || firstRead.reading) || 0;
   const r2 = parseFloat(overrideSecondRead || secondRead.reading) || 0;
@@ -114,6 +194,46 @@ const PulseMeter = () => {
       reader.readAsDataURL(file);
     });
 
+  // AI extraction of meter reading from photo
+  const extractMeterReading = async (base64: string, mime: string, which: "first" | "second") => {
+    const setExtracting = which === "first" ? setExtractingFirst : setExtractingSecond;
+    const setter = which === "first" ? setFirstRead : setSecondRead;
+    setExtracting(true);
+
+    try {
+      const { data, error } = await supabase.functions.invoke("extract-pulse-meter", {
+        body: { imageBase64: base64, mimeType: mime },
+      });
+
+      if (error) {
+        console.error("Extraction error:", error);
+        toast.error("Could not extract reading from image. Please enter manually.");
+        return;
+      }
+
+      if (data?.reading != null) {
+        setter(prev => ({ ...prev, reading: String(data.reading) }));
+        toast.success(`Reading extracted: ${data.reading}${data.confidence === "low" ? " (low confidence — please verify)" : ""}`);
+      }
+      if (data?.dateTime) {
+        // Convert ISO to datetime-local format
+        const dt = new Date(data.dateTime);
+        if (!isNaN(dt.getTime())) {
+          const local = dt.toISOString().slice(0, 16);
+          setter(prev => ({ ...prev, dateTime: local }));
+        }
+      }
+      if (data?.notes) {
+        console.log(`AI notes (${which}):`, data.notes);
+      }
+    } catch (err) {
+      console.error("Extraction failed:", err);
+      toast.error("Failed to extract reading. Please enter manually.");
+    } finally {
+      setExtracting(false);
+    }
+  };
+
   const handleImageDrop = useCallback((which: "first" | "second") => async (e: React.DragEvent) => {
     e.preventDefault();
     const file = e.dataTransfer.files[0];
@@ -122,6 +242,8 @@ const PulseMeter = () => {
     const base64 = await fileToBase64(file);
     const setter = which === "first" ? setFirstRead : setSecondRead;
     setter(prev => ({ ...prev, image: url, imageFile: file, imageBase64: base64, imageMime: file.type }));
+    // Trigger AI extraction
+    extractMeterReading(base64, file.type, which);
   }, []);
 
   const handleImageSelect = useCallback((which: "first" | "second") => async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -131,6 +253,8 @@ const PulseMeter = () => {
     const base64 = await fileToBase64(file);
     const setter = which === "first" ? setFirstRead : setSecondRead;
     setter(prev => ({ ...prev, image: url, imageFile: file, imageBase64: base64, imageMime: file.type }));
+    // Trigger AI extraction
+    extractMeterReading(base64, file.type, which);
   }, []);
 
   const removeImage = (which: "first" | "second") => {
@@ -221,33 +345,57 @@ const PulseMeter = () => {
     }
     setIsSaving(true);
     try {
-      const payload = {
-        user_id: user.id,
-        name: validationName,
-        status: "draft",
-        readings: [] as any[],
-        settings: { ...siteInfo, meterMode: mode, toolType: "pulse" },
-        validation_data: JSON.parse(JSON.stringify({
-          firstRead: { dateTime: firstRead.dateTime, reading: firstRead.reading, imageBase64: firstRead.imageBase64, imageMime: firstRead.imageMime },
-          secondRead: { dateTime: secondRead.dateTime, reading: secondRead.reading, imageBase64: secondRead.imageBase64, imageMime: secondRead.imageMime },
-          hubRows,
-          selectedHubRow,
-          manualHubCount,
-          manualFactor,
-          overrideFirstRead,
-          overrideSecondRead,
-          overrideHubCount,
-          overrideFactor,
-          comments,
-          accuracy,
-          status: status.label,
-        })),
-        comparison_data: [] as any[],
-        bravegen_raw_data: [] as any[],
-      };
-      const { error } = await supabase.from("validations").insert([payload]);
-      if (error) throw error;
-      toast.success("Validation saved to your account");
+      const validationData = JSON.parse(JSON.stringify({
+        firstRead: { dateTime: firstRead.dateTime, reading: firstRead.reading, imageBase64: firstRead.imageBase64, imageMime: firstRead.imageMime },
+        secondRead: { dateTime: secondRead.dateTime, reading: secondRead.reading, imageBase64: secondRead.imageBase64, imageMime: secondRead.imageMime },
+        hubRows,
+        selectedHubRow,
+        manualHubCount,
+        manualPulseCount1,
+        manualPulseCount2,
+        manualFactor,
+        overrideFirstRead,
+        overrideSecondRead,
+        overrideHubCount,
+        overrideFactor,
+        comments,
+        accuracy,
+        status: status.label,
+      }));
+
+      if (currentValidationId) {
+        // Update existing
+        const { error } = await supabase
+          .from("validations")
+          .update({
+            name: validationName,
+            settings: { ...siteInfo, meterMode: mode, toolType: "pulse" },
+            validation_data: validationData,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", currentValidationId);
+        if (error) throw error;
+        toast.success("Validation updated");
+      } else {
+        // Insert new
+        const { data, error } = await supabase
+          .from("validations")
+          .insert([{
+            user_id: user.id,
+            name: validationName,
+            status: "draft",
+            readings: [] as any[],
+            settings: { ...siteInfo, meterMode: mode, toolType: "pulse" },
+            validation_data: validationData,
+            comparison_data: [] as any[],
+            bravegen_raw_data: [] as any[],
+          }])
+          .select("id")
+          .single();
+        if (error) throw error;
+        if (data) setCurrentValidationId(data.id);
+        toast.success("Validation saved to your account");
+      }
     } catch (err: any) {
       toast.error("Failed to save: " + err.message);
     } finally {
@@ -268,6 +416,7 @@ const PulseMeter = () => {
       `Physical Difference (${unit}): ${physicalDiff.toFixed(4)}`,
       ``, `BraveGen Hub Data`,
       `Load: ${activeHubRow?.load || "Manual Entry"}`,
+      `Pulse Count 1: ${manualPulseCount1}`, `Pulse Count 2: ${manualPulseCount2}`,
       `Hub Pulse Count: ${hubCount}`, `Pulse Factor: ${factor}`,
       `Hub Volume (${unit}): ${hubVolume.toFixed(4)}`,
       ``, `Accuracy: ${accuracy.toFixed(2)}% — ${status.label}`,
@@ -286,7 +435,7 @@ const PulseMeter = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header — same as electricity tool */}
+      {/* Header */}
       <header className="border-b border-border bg-card">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-3">
@@ -301,7 +450,6 @@ const PulseMeter = () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {/* Mode toggle */}
             <div className="flex items-center rounded-md border border-border overflow-hidden">
               <button
                 onClick={() => handleModeChange("water")}
@@ -330,7 +478,7 @@ const PulseMeter = () => {
       </header>
 
       <main className="mx-auto max-w-7xl space-y-6 px-6 py-8">
-        {/* Validation Name (when signed in) */}
+        {/* Validation Name */}
         {user && (
           <div className="flex items-center gap-3">
             <Input
@@ -388,6 +536,7 @@ const PulseMeter = () => {
                 const read = which === "first" ? firstRead : secondRead;
                 const setRead = which === "first" ? setFirstRead : setSecondRead;
                 const ref = which === "first" ? firstInputRef : secondInputRef;
+                const isExtracting = which === "first" ? extractingFirst : extractingSecond;
                 return (
                   <div key={which} className="space-y-3">
                     <p className="text-sm font-medium text-primary">{which === "first" ? "First Read" : "Second Read"}</p>
@@ -405,6 +554,14 @@ const PulseMeter = () => {
                           <button onClick={e => { e.stopPropagation(); removeImage(which); }} className="absolute top-1 right-1 rounded-full p-1 bg-background/80 hover:bg-background shadow">
                             <X className="h-4 w-4 text-destructive" />
                           </button>
+                          {isExtracting && (
+                            <div className="absolute inset-0 bg-background/70 flex items-center justify-center">
+                              <div className="flex items-center gap-2 text-sm text-primary">
+                                <Loader2 className="h-5 w-5 animate-spin" />
+                                <span>Reading meter...</span>
+                              </div>
+                            </div>
+                          )}
                         </>
                       ) : (
                         <div className="text-center text-muted-foreground">
