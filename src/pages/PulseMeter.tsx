@@ -311,7 +311,8 @@ const PulseMeter = () => {
             return;
           }
 
-          // Group by channel name
+          // Collect raw rows and group by channel
+          const rawRows: RawHubRow[] = [];
           const channels: Record<string, { events: string[]; usages: number[] }> = {};
           for (let i = 1; i < json.length; i++) {
             const row = json[i];
@@ -320,10 +321,12 @@ const PulseMeter = () => {
             const eventStr = String(row[eventCol] || "").trim();
             const usage = parseFloat(String(row[usageCol])) || 0;
             if (!eventStr) continue;
+            rawRows.push({ event: eventStr, channel: channelName, usage });
             if (!channels[channelName]) channels[channelName] = { events: [], usages: [] };
             channels[channelName].events.push(eventStr);
             channels[channelName].usages.push(usage);
           }
+          setRawHubData(rawRows);
 
           const channelNames = Object.keys(channels);
           if (channelNames.length === 0) {
