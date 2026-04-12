@@ -164,6 +164,8 @@ const PulseMeter = () => {
         if (vd.manualHubCount) setManualHubCount(vd.manualHubCount);
         if (vd.manualPulseCount1) setManualPulseCount1(vd.manualPulseCount1);
         if (vd.manualPulseCount2) setManualPulseCount2(vd.manualPulseCount2);
+        if (vd.pulseDateTime1) setPulseDateTime1(vd.pulseDateTime1);
+        if (vd.pulseDateTime2) setPulseDateTime2(vd.pulseDateTime2);
         if (vd.manualFactor) setManualFactor(vd.manualFactor);
         if (vd.overrideFirstRead) setOverrideFirstRead(vd.overrideFirstRead);
         if (vd.overrideSecondRead) setOverrideSecondRead(vd.overrideSecondRead);
