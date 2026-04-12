@@ -83,6 +83,8 @@ const PulseMeter = () => {
   const [extractingFirst, setExtractingFirst] = useState(false);
   const [extractingSecond, setExtractingSecond] = useState(false);
 
+  const [rawHubData, setRawHubData] = useState<RawHubRow[]>([]);
+  const [showRawData, setShowRawData] = useState(false);
   const [hubFile, setHubFile] = useState<string | null>(null);
   const [hubRows, setHubRows] = useState<HubRow[]>([]);
   const [selectedHubRow, setSelectedHubRow] = useState<number>(0);
