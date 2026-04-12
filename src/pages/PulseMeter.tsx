@@ -59,6 +59,12 @@ interface ParsedPulseData {
   pulseDiff: number;
 }
 
+interface RawHubRow {
+  event: string;
+  channel: string;
+  usage: number;
+}
+
 const DEFAULT_FACTORS: Record<MeterMode, number> = { water: 0.005, gas: 0.3 };
 
 const PulseMeter = () => {
