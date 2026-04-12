@@ -696,7 +696,45 @@ const PulseMeter = () => {
               <p className="text-sm text-muted-foreground">{hubFile ? hubFile : "Drop or click to upload BraveGen export (.xlsx, .csv)"}</p>
             </div>
 
-            {hubRows.length > 0 && (
+            {/* Raw Extracted Data Preview */}
+            {rawHubData.length > 0 && (
+              <Collapsible open={showRawData} onOpenChange={setShowRawData}>
+                <CollapsibleTrigger asChild>
+                  <Button variant="outline" size="sm" className="w-full gap-2">
+                    <Table2 className="h-4 w-4" />
+                    {showRawData ? "Hide" : "Show"} Extracted Data ({rawHubData.length} rows)
+                    {showRawData ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="mt-3 rounded-lg border border-border overflow-hidden">
+                    <ScrollArea className="h-64">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-secondary hover:bg-secondary">
+                            <TableHead className="font-semibold text-foreground text-xs w-10">#</TableHead>
+                            <TableHead className="font-semibold text-foreground text-xs">Date/Time</TableHead>
+                            <TableHead className="font-semibold text-foreground text-xs">Channel</TableHead>
+                            <TableHead className="font-semibold text-foreground text-xs text-right">{mode === "water" ? "Pulse Count" : "Pulse Count"}</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {rawHubData.map((row, i) => (
+                            <TableRow key={i} className="hover:bg-surface-elevated">
+                              <TableCell className="text-xs text-muted-foreground font-mono">{i + 1}</TableCell>
+                              <TableCell className="text-xs font-mono">{row.event}</TableCell>
+                              <TableCell className="text-xs">{row.channel}</TableCell>
+                              <TableCell className="text-xs font-mono text-right">{row.usage}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </ScrollArea>
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            )}
+
               <div className="space-y-3">
                 {hubRows.length > 1 && (
                   <div>
