@@ -735,6 +735,7 @@ const PulseMeter = () => {
               </Collapsible>
             )}
 
+            {hubRows.length > 0 && (
               <div className="space-y-3">
                 {hubRows.length > 1 && (
                   <div>
