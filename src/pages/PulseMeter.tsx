@@ -48,6 +48,15 @@ interface HubRow {
   result: string;
 }
 
+interface ParsedPulseData {
+  channelName: string;
+  pulseCount1: number;
+  pulseCount2: number;
+  dateTime1: string;
+  dateTime2: string;
+  pulseDiff: number;
+}
+
 const DEFAULT_FACTORS: Record<MeterMode, number> = { water: 0.005, gas: 0.3 };
 
 const PulseMeter = () => {
