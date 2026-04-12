@@ -705,24 +705,36 @@ const PulseMeter = () => {
 
             {hubRows.length === 0 && (
               <div className="space-y-4">
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Date/Time 1</Label>
+                    <Input type="datetime-local" value={pulseDateTime1} onChange={e => setPulseDateTime1(e.target.value)} className="mt-1" />
+                  </div>
                   <div>
                     <Label className="text-xs text-muted-foreground">Pulse Count 1</Label>
-                    <Input type="number" value={manualPulseCount1} onChange={e => { setManualPulseCount1(e.target.value); setManualHubCount(""); }} className="mt-1" placeholder="e.g. 0" />
+                    <Input type="number" value={manualPulseCount1} onChange={e => { setManualPulseCount1(e.target.value); setManualHubCount(""); }} className="mt-1" placeholder="e.g. 756" />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Date/Time 2</Label>
+                    <Input type="datetime-local" value={pulseDateTime2} onChange={e => setPulseDateTime2(e.target.value)} className="mt-1" />
                   </div>
                   <div>
                     <Label className="text-xs text-muted-foreground">Pulse Count 2</Label>
-                    <Input type="number" value={manualPulseCount2} onChange={e => { setManualPulseCount2(e.target.value); setManualHubCount(""); }} className="mt-1" placeholder="e.g. 1270" />
-                  </div>
-                  <div>
-                    <Label className="text-xs text-muted-foreground">Hub Pulse Count (Diff)</Label>
-                    <Input type="number" value={manualHubCount || (calculatedPulseDiff !== 0 ? String(calculatedPulseDiff) : "")} onChange={e => setManualHubCount(e.target.value)} className="mt-1" placeholder="Auto or manual" />
+                    <Input type="number" value={manualPulseCount2} onChange={e => { setManualPulseCount2(e.target.value); setManualHubCount(""); }} className="mt-1" placeholder="e.g. 2078" />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                   <div>
+                    <Label className="text-xs text-muted-foreground">Hub Pulse Count (Diff)</Label>
+                    <Input type="number" value={manualHubCount || (calculatedPulseDiff !== 0 ? String(calculatedPulseDiff) : "")} onChange={e => setManualHubCount(e.target.value)} className="mt-1" placeholder="Auto or manual" />
+                  </div>
+                  <div>
                     <Label className="text-xs text-muted-foreground">Pulse Factor ({unit}/pulse)</Label>
                     <Input type="number" step="any" value={manualFactor} onChange={e => setManualFactor(e.target.value)} className="mt-1" placeholder={mode === "water" ? "0.005" : "0.3"} />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Hub Volume ({unit})</Label>
+                    <Input type="text" readOnly value={hubVolume !== 0 ? hubVolume.toFixed(4) : "—"} className="mt-1 bg-surface" />
                   </div>
                 </div>
               </div>
