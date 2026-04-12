@@ -1,6 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Droplets, Flame, Camera, X, Upload, FileSpreadsheet, ChevronDown, ChevronUp, Copy, Gauge, LogIn, LayoutDashboard, Save, Loader2 } from "lucide-react";
+import { Droplets, Flame, Camera, X, Upload, FileSpreadsheet, ChevronDown, ChevronUp, Copy, Gauge, LogIn, LayoutDashboard, Save, Loader2, Table2 } from "lucide-react";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -57,6 +59,12 @@ interface ParsedPulseData {
   pulseDiff: number;
 }
 
+interface RawHubRow {
+  event: string;
+  channel: string;
+  usage: number;
+}
+
 const DEFAULT_FACTORS: Record<MeterMode, number> = { water: 0.005, gas: 0.3 };
 
 const PulseMeter = () => {
@@ -75,6 +83,8 @@ const PulseMeter = () => {
   const [extractingFirst, setExtractingFirst] = useState(false);
   const [extractingSecond, setExtractingSecond] = useState(false);
 
+  const [rawHubData, setRawHubData] = useState<RawHubRow[]>([]);
+  const [showRawData, setShowRawData] = useState(false);
   const [hubFile, setHubFile] = useState<string | null>(null);
   const [hubRows, setHubRows] = useState<HubRow[]>([]);
   const [selectedHubRow, setSelectedHubRow] = useState<number>(0);
@@ -301,7 +311,8 @@ const PulseMeter = () => {
             return;
           }
 
-          // Group by channel name
+          // Collect raw rows and group by channel
+          const rawRows: RawHubRow[] = [];
           const channels: Record<string, { events: string[]; usages: number[] }> = {};
           for (let i = 1; i < json.length; i++) {
             const row = json[i];
@@ -310,10 +321,12 @@ const PulseMeter = () => {
             const eventStr = String(row[eventCol] || "").trim();
             const usage = parseFloat(String(row[usageCol])) || 0;
             if (!eventStr) continue;
+            rawRows.push({ event: eventStr, channel: channelName, usage });
             if (!channels[channelName]) channels[channelName] = { events: [], usages: [] };
             channels[channelName].events.push(eventStr);
             channels[channelName].usages.push(usage);
           }
+          setRawHubData(rawRows);
 
           const channelNames = Object.keys(channels);
           if (channelNames.length === 0) {
@@ -682,6 +695,45 @@ const PulseMeter = () => {
               <Upload className="h-8 w-8 mx-auto mb-2 text-primary" />
               <p className="text-sm text-muted-foreground">{hubFile ? hubFile : "Drop or click to upload BraveGen export (.xlsx, .csv)"}</p>
             </div>
+
+            {/* Raw Extracted Data Preview */}
+            {rawHubData.length > 0 && (
+              <Collapsible open={showRawData} onOpenChange={setShowRawData}>
+                <CollapsibleTrigger asChild>
+                  <Button variant="outline" size="sm" className="w-full gap-2">
+                    <Table2 className="h-4 w-4" />
+                    {showRawData ? "Hide" : "Show"} Extracted Data ({rawHubData.length} rows)
+                    {showRawData ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="mt-3 rounded-lg border border-border overflow-hidden">
+                    <ScrollArea className="h-64">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-secondary hover:bg-secondary">
+                            <TableHead className="font-semibold text-foreground text-xs w-10">#</TableHead>
+                            <TableHead className="font-semibold text-foreground text-xs">Date/Time</TableHead>
+                            <TableHead className="font-semibold text-foreground text-xs">Channel</TableHead>
+                            <TableHead className="font-semibold text-foreground text-xs text-right">{mode === "water" ? "Pulse Count" : "Pulse Count"}</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {rawHubData.map((row, i) => (
+                            <TableRow key={i} className="hover:bg-surface-elevated">
+                              <TableCell className="text-xs text-muted-foreground font-mono">{i + 1}</TableCell>
+                              <TableCell className="text-xs font-mono">{row.event}</TableCell>
+                              <TableCell className="text-xs">{row.channel}</TableCell>
+                              <TableCell className="text-xs font-mono text-right">{row.usage}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </ScrollArea>
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            )}
 
             {hubRows.length > 0 && (
               <div className="space-y-3">
