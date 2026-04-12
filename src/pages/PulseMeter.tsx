@@ -285,6 +285,66 @@ const PulseMeter = () => {
         const ws = wb.Sheets[wb.SheetNames[0]];
         const json: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true });
 
+        // Try to detect ESP Analytics CSV format (Event, Load/Channel Name, ..., Usage)
+        const firstRow = (json[0] || []).map((c: any) => String(c).toLowerCase().trim());
+        const isEspFormat = firstRow.some(h => h.includes("event")) && firstRow.some(h => h.includes("usage"));
+
+        if (isEspFormat) {
+          const eventCol = firstRow.findIndex(h => h.includes("event"));
+          const loadCol = firstRow.findIndex(h => h.includes("load") || h.includes("channel name"));
+          const usageCol = firstRow.findIndex(h => h.includes("usage"));
+
+          if (eventCol < 0 || usageCol < 0) {
+            toast.error("Could not find Event/Usage columns.");
+            return;
+          }
+
+          // Group by channel name
+          const channels: Record<string, { events: string[]; usages: number[] }> = {};
+          for (let i = 1; i < json.length; i++) {
+            const row = json[i];
+            if (!row || row.length === 0) continue;
+            const channelName = loadCol >= 0 ? String(row[loadCol] || "").trim() : "Default";
+            const eventStr = String(row[eventCol] || "").trim();
+            const usage = parseFloat(String(row[usageCol])) || 0;
+            if (!eventStr) continue;
+            if (!channels[channelName]) channels[channelName] = { events: [], usages: [] };
+            channels[channelName].events.push(eventStr);
+            channels[channelName].usages.push(usage);
+          }
+
+          const channelNames = Object.keys(channels);
+          if (channelNames.length === 0) {
+            toast.error("No data rows found.");
+            return;
+          }
+
+          // Use first channel — take first and last usage as pulse count 1 & 2
+          const ch = channels[channelNames[0]];
+          const pc1 = ch.usages[0];
+          const pc2 = ch.usages[ch.usages.length - 1];
+          const dt1Raw = ch.events[0];
+          const dt2Raw = ch.events[ch.events.length - 1];
+
+          // Parse DD/MM/YYYY HH:mm:ss → datetime-local format
+          const parseEspDate = (s: string): string => {
+            const m = s.match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/);
+            if (m) return `${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}`;
+            return "";
+          };
+
+          setManualPulseCount1(String(pc1));
+          setManualPulseCount2(String(pc2));
+          setPulseDateTime1(parseEspDate(dt1Raw));
+          setPulseDateTime2(parseEspDate(dt2Raw));
+          setManualHubCount("");
+          setHubRows([]);
+
+          toast.success(`Extracted pulse counts from "${channelNames[0]}": ${pc1} → ${pc2} (diff: ${pc2 - pc1})`);
+          return;
+        }
+
+        // Fallback: original structured format with load/hub count/factor columns
         let headerIdx = -1;
         for (let i = 0; i < Math.min(json.length, 20); i++) {
           const row = (json[i] || []).map((c: any) => String(c).toLowerCase());
