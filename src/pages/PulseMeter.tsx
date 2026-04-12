@@ -426,6 +426,8 @@ const PulseMeter = () => {
         manualHubCount,
         manualPulseCount1,
         manualPulseCount2,
+        pulseDateTime1,
+        pulseDateTime2,
         manualFactor,
         overrideFirstRead,
         overrideSecondRead,
