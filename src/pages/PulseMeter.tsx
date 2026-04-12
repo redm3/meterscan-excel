@@ -81,6 +81,8 @@ const PulseMeter = () => {
   const [manualHubCount, setManualHubCount] = useState("");
   const [manualPulseCount1, setManualPulseCount1] = useState("");
   const [manualPulseCount2, setManualPulseCount2] = useState("");
+  const [pulseDateTime1, setPulseDateTime1] = useState("");
+  const [pulseDateTime2, setPulseDateTime2] = useState("");
   const [manualFactor, setManualFactor] = useState(String(DEFAULT_FACTORS["water"]));
 
   const [overrideFirstRead, setOverrideFirstRead] = useState("");
