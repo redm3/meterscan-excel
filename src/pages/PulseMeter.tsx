@@ -873,10 +873,35 @@ const PulseMeter = () => {
         </Card>
 
         {/* Actions */}
-        <div className="flex gap-3 pb-8">
-          <Button onClick={handleCopyToClipboard} className="gap-2">
+        <div className="flex flex-wrap gap-3 pb-8">
+          <Button onClick={handleCopyToClipboard} variant="outline" className="gap-2">
             <Copy className="h-4 w-4" /> Copy to Clipboard
           </Button>
+          <Button onClick={async () => {
+            try {
+              const data = buildExportData();
+              const blob = await generatePulseValidationExcel(data);
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `DV_${validationName.replace(/\s+/g, "_")}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+              a.click();
+              URL.revokeObjectURL(url);
+              if (currentValidationId) {
+                await supabase.from("validations").update({ status: "exported" }).eq("id", currentValidationId);
+              }
+              toast.success("Excel downloaded!");
+            } catch (err: any) {
+              toast.error("Export failed: " + err.message);
+            }
+          }} variant="outline" className="gap-2">
+            <Download className="h-4 w-4" /> Export Excel
+          </Button>
+          {user && (
+            <Button onClick={() => setShowSendDialog(true)} className="gap-2">
+              <Send className="h-4 w-4" /> Send DV to BraveGen
+            </Button>
+          )}
           {!user && (
             <Button variant="outline" onClick={() => navigate("/auth")} className="gap-2">
               <Save className="h-4 w-4" /> Sign In to Save
@@ -891,6 +916,19 @@ const PulseMeter = () => {
           {lightboxImage && <img src={lightboxImage} alt="Meter reading" className="w-full h-auto rounded" />}
         </DialogContent>
       </Dialog>
+
+      {/* Send DV Dialog */}
+      <SendDvDialog
+        open={showSendDialog}
+        onOpenChange={setShowSendDialog}
+        validationName={validationName}
+        validationId={currentValidationId}
+        onSent={() => toast.success("DV submitted!")}
+        generateExcel={async () => {
+          const data = buildExportData();
+          return generatePulseValidationExcel(data);
+        }}
+      />
     </div>
   );
 };
