@@ -517,6 +517,32 @@ const PulseMeter = () => {
     toast.success("Copied to clipboard");
   };
 
+  const buildExportData = (): PulseValidationExportData => ({
+    siteInfo,
+    mode,
+    validationName,
+    firstRead: {
+      dateTime: firstRead.dateTime,
+      reading: firstRead.reading,
+      imageBase64: firstRead.imageBase64,
+      imageMime: firstRead.imageMime,
+    },
+    secondRead: {
+      dateTime: secondRead.dateTime,
+      reading: secondRead.reading,
+      imageBase64: secondRead.imageBase64,
+      imageMime: secondRead.imageMime,
+    },
+    hubCount,
+    factor,
+    hubVolume,
+    physicalDiff,
+    accuracy,
+    status: status.label,
+    comments,
+    rawHubData,
+  });
+
   const handleModeChange = (m: MeterMode) => {
     setMode(m);
     if (!overrideFactor && !activeHubRow) {
