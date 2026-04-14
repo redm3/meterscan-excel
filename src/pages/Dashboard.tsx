@@ -17,8 +17,10 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
-import { Plus, Search, LogOut, Trash2, Download, Loader2, ClipboardList, Zap, Droplets, Flame } from "lucide-react";
+import { Plus, Search, LogOut, Trash2, Download, Loader2, ClipboardList, Zap, Droplets, Flame, Send } from "lucide-react";
 import { generateValidationExcel } from "@/lib/excelGenerator";
+import { generatePulseValidationExcel, PulseValidationExportData } from "@/lib/pulseExcelGenerator";
+import { SendDvDialog } from "@/components/SendDvDialog";
 
 interface SavedValidation {
   id: string;
@@ -39,6 +41,7 @@ const statusColors: Record<string, string> = {
   draft: "bg-yellow-600/20 text-yellow-400 border-yellow-600/40",
   complete: "bg-green-600/20 text-green-400 border-green-600/40",
   exported: "bg-blue-600/20 text-blue-400 border-blue-600/40",
+  submitted: "bg-purple-600/20 text-purple-400 border-purple-600/40",
 };
 
 const toolTypeLabels: Record<string, { label: string; icon: typeof Zap }> = {
@@ -54,6 +57,7 @@ const Dashboard = () => {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [showNewDialog, setShowNewDialog] = useState(false);
+  const [sendDialogValidation, setSendDialogValidation] = useState<SavedValidation | null>(null);
 
   const fetchValidations = async () => {
     setLoading(true);
@@ -83,16 +87,70 @@ const Dashboard = () => {
     }
   };
 
+  const buildPulseExcelData = (v: SavedValidation): PulseValidationExportData => {
+    const vd = v.validation_data || {};
+    const settings = v.settings || {};
+    const r1 = parseFloat(vd.firstRead?.reading || "0") || 0;
+    const r2 = parseFloat(vd.secondRead?.reading || "0") || 0;
+    const physicalDiff = r2 - r1;
+    const hubCount = vd.accuracy ? (parseFloat(vd.overrideHubCount) || parseFloat(vd.manualHubCount) || (parseFloat(vd.manualPulseCount2 || "0") - parseFloat(vd.manualPulseCount1 || "0")) || 0) : 0;
+    const factor = parseFloat(vd.overrideFactor || vd.manualFactor || "0") || 0;
+    const hubVolume = hubCount * factor;
+    const accuracy = vd.accuracy || (physicalDiff !== 0 ? (hubVolume / physicalDiff) * 100 : 0);
+
+    return {
+      siteInfo: {
+        feed: settings.feed || "",
+        serialNumber: settings.serialNumber || "",
+        site: settings.site || "",
+        building: settings.building || "",
+      },
+      mode: settings.meterMode || "water",
+      validationName: v.name,
+      firstRead: {
+        dateTime: vd.firstRead?.dateTime || "",
+        reading: vd.firstRead?.reading || "",
+        imageBase64: vd.firstRead?.imageBase64 || null,
+        imageMime: vd.firstRead?.imageMime || null,
+      },
+      secondRead: {
+        dateTime: vd.secondRead?.dateTime || "",
+        reading: vd.secondRead?.reading || "",
+        imageBase64: vd.secondRead?.imageBase64 || null,
+        imageMime: vd.secondRead?.imageMime || null,
+      },
+      hubCount,
+      factor,
+      hubVolume,
+      physicalDiff,
+      accuracy,
+      status: vd.status || "N/A",
+      comments: vd.comments || "",
+      rawHubData: vd.hubRows?.length > 0
+        ? vd.hubRows.map((r: any) => ({ event: r.dateFirst || "", channel: r.load || "", usage: r.hubCount || 0 }))
+        : [],
+    };
+  };
+
   const handleExport = async (v: SavedValidation) => {
     try {
-      const blob = await generateValidationExcel(
-        v.readings, v.settings, v.validation_data, v.comparison_data,
-        v.bravegen_raw_data, v.source_image_base64, v.source_image_mime
-      );
+      const toolType = v.settings?.toolType || "electricity";
+      let blob: Blob;
+
+      if (toolType === "pulse") {
+        const data = buildPulseExcelData(v);
+        blob = await generatePulseValidationExcel(data);
+      } else {
+        blob = await generateValidationExcel(
+          v.readings, v.settings, v.validation_data, v.comparison_data,
+          v.bravegen_raw_data, v.source_image_base64, v.source_image_mime
+        );
+      }
+
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `Validation_${v.name.replace(/\s+/g, "_")}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.download = `DV_${v.name.replace(/\s+/g, "_")}_${new Date().toISOString().slice(0, 10)}.xlsx`;
       a.click();
       URL.revokeObjectURL(url);
       await supabase.from("validations").update({ status: "exported" }).eq("id", v.id);
@@ -158,6 +216,7 @@ const Dashboard = () => {
               <SelectItem value="draft">Draft</SelectItem>
               <SelectItem value="complete">Complete</SelectItem>
               <SelectItem value="exported">Exported</SelectItem>
+              <SelectItem value="submitted">Submitted</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -185,7 +244,7 @@ const Dashboard = () => {
           <div className="grid gap-3">
             {filtered.map((v) => {
               const tt = getToolType(v);
-              const ToolIcon = toolTypeLabels[tt]?.icon || Zap;
+              const ToolIcon = tt === "pulse" ? (v.settings?.meterMode === "gas" ? Flame : Droplets) : Zap;
               const modeLabel = tt === "pulse" ? (v.settings?.meterMode === "gas" ? "Gas" : "Water") : "Electricity";
               return (
                 <div
@@ -204,11 +263,12 @@ const Dashboard = () => {
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <Badge className={`${statusColors[v.status] || ""} text-xs capitalize`}>{v.status}</Badge>
-                    {tt === "electricity" && (
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={e => { e.stopPropagation(); handleExport(v); }}>
-                        <Download className="h-3.5 w-3.5" />
-                      </Button>
-                    )}
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={e => { e.stopPropagation(); handleExport(v); }} title="Download Excel">
+                      <Download className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-primary" onClick={e => { e.stopPropagation(); setSendDialogValidation(v); }} title="Send DV via email">
+                      <Send className="h-3.5 w-3.5" />
+                    </Button>
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={e => e.stopPropagation()}>
@@ -275,6 +335,32 @@ const Dashboard = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Send DV Dialog */}
+      {sendDialogValidation && (
+        <SendDvDialog
+          open={!!sendDialogValidation}
+          onOpenChange={(open) => { if (!open) setSendDialogValidation(null); }}
+          validationName={sendDialogValidation.name}
+          validationId={sendDialogValidation.id}
+          onSent={() => {
+            setValidations(prev => prev.map(v => v.id === sendDialogValidation.id ? { ...v, status: "submitted" } : v));
+            setSendDialogValidation(null);
+          }}
+          generateExcel={async () => {
+            const v = sendDialogValidation;
+            const tt = v.settings?.toolType || "electricity";
+            if (tt === "pulse") {
+              return generatePulseValidationExcel(buildPulseExcelData(v));
+            } else {
+              return generateValidationExcel(
+                v.readings, v.settings, v.validation_data, v.comparison_data,
+                v.bravegen_raw_data, v.source_image_base64, v.source_image_mime
+              );
+            }
+          }}
+        />
+      )}
     </div>
   );
 };
