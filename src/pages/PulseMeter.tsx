@@ -17,7 +17,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import bravegenLogo from "@/assets/bravegen-logo.svg";
 import * as XLSX from "xlsx";
-import { generatePulseValidationExcel, PulseValidationExportData } from "@/lib/pulseExcelGenerator";
+import { generatePulseValidationExcel, type PulseValidationExportData } from "@/lib/pulseExcelGenerator";
 import { SendDvDialog } from "@/components/SendDvDialog";
 
 type MeterMode = "water" | "gas";
