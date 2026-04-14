@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Droplets, Flame, Camera, X, Upload, FileSpreadsheet, ChevronDown, ChevronUp, Copy, Gauge, LogIn, LayoutDashboard, Save, Loader2, Table2 } from "lucide-react";
+import { Droplets, Flame, Camera, X, Upload, FileSpreadsheet, ChevronDown, ChevronUp, Copy, Gauge, LogIn, LayoutDashboard, Save, Loader2, Table2, Download, Send } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import bravegenLogo from "@/assets/bravegen-logo.svg";
 import * as XLSX from "xlsx";
+import { generatePulseValidationExcel, PulseValidationExportData } from "@/lib/pulseExcelGenerator";
+import { SendDvDialog } from "@/components/SendDvDialog";
 
 type MeterMode = "water" | "gas";
 
