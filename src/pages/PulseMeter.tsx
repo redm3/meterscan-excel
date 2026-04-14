@@ -104,6 +104,7 @@ const PulseMeter = () => {
 
   const [comments, setComments] = useState("");
   const [validationName, setValidationName] = useState("Untitled Pulse Validation");
+  const [showSendDialog, setShowSendDialog] = useState(false);
 
   const firstInputRef = useRef<HTMLInputElement>(null);
   const secondInputRef = useRef<HTMLInputElement>(null);
