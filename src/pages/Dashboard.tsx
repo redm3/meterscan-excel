@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -17,7 +17,7 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
-import { Plus, Search, LogOut, Trash2, Download, Loader2, ClipboardList, Zap, Droplets, Flame, Send } from "lucide-react";
+import { Plus, Search, LogOut, Trash2, Download, Loader2, ClipboardList, Zap, Droplets, Flame, Send, Shield } from "lucide-react";
 import { generateValidationExcel } from "@/lib/excelGenerator";
 import { generatePulseValidationExcel, PulseValidationExportData } from "@/lib/pulseExcelGenerator";
 import { SendDvDialog } from "@/components/SendDvDialog";
@@ -35,6 +35,11 @@ interface SavedValidation {
   source_image_mime: string | null;
   created_at: string;
   updated_at: string;
+  user_id: string;
+}
+
+interface ProfileMap {
+  [userId: string]: { display_name: string | null; company: string | null; country: string | null };
 }
 
 const statusColors: Record<string, string> = {
@@ -44,18 +49,17 @@ const statusColors: Record<string, string> = {
   submitted: "bg-purple-600/20 text-purple-400 border-purple-600/40",
 };
 
-const toolTypeLabels: Record<string, { label: string; icon: typeof Zap }> = {
-  electricity: { label: "Electricity", icon: Zap },
-  pulse: { label: "Pulse", icon: Droplets },
-};
-
 const Dashboard = () => {
-  const { user, signOut } = useAuth();
+  const { user, signOut, isAdmin } = useAuth();
   const navigate = useNavigate();
   const [validations, setValidations] = useState<SavedValidation[]>([]);
+  const [profiles, setProfiles] = useState<ProfileMap>({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [contractorFilter, setContractorFilter] = useState("all");
+  const [siteFilter, setSiteFilter] = useState("all");
+  const [countryFilter, setCountryFilter] = useState("all");
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [sendDialogValidation, setSendDialogValidation] = useState<SavedValidation | null>(null);
 
@@ -71,11 +75,24 @@ const Dashboard = () => {
       console.error(error);
     } else {
       setValidations((data as SavedValidation[]) || []);
+
+      // If admin, fetch all profiles for contractor info
+      if (isAdmin && data && data.length > 0) {
+        const userIds = [...new Set(data.map((v: any) => v.user_id))];
+        const { data: profileData } = await supabase
+          .from("profiles")
+          .select("user_id, display_name, company, country");
+        if (profileData) {
+          const map: ProfileMap = {};
+          profileData.forEach((p: any) => { map[p.user_id] = p; });
+          setProfiles(map);
+        }
+      }
     }
     setLoading(false);
   };
 
-  useEffect(() => { fetchValidations(); }, []);
+  useEffect(() => { fetchValidations(); }, [isAdmin]);
 
   const handleDelete = async (id: string) => {
     const { error } = await supabase.from("validations").delete().eq("id", id);
@@ -172,13 +189,37 @@ const Dashboard = () => {
   };
 
   const getToolType = (v: SavedValidation) => v.settings?.toolType || "electricity";
+  const getContractorName = (v: SavedValidation) => profiles[v.user_id]?.display_name || profiles[v.user_id]?.company || v.user_id.slice(0, 8);
+  const getSite = (v: SavedValidation) => v.settings?.siteName || v.settings?.site || "";
+  const getCountry = (v: SavedValidation) => profiles[v.user_id]?.country || "";
+
+  // Build unique filter options for admin
+  const uniqueContractors = useMemo(() => {
+    if (!isAdmin) return [];
+    const set = new Set(validations.map(v => getContractorName(v)));
+    return [...set].sort();
+  }, [validations, profiles, isAdmin]);
+
+  const uniqueSites = useMemo(() => {
+    const set = new Set(validations.map(v => getSite(v)).filter(Boolean));
+    return [...set].sort();
+  }, [validations]);
+
+  const uniqueCountries = useMemo(() => {
+    if (!isAdmin) return [];
+    const set = new Set(validations.map(v => getCountry(v)).filter(Boolean));
+    return [...set].sort();
+  }, [validations, profiles, isAdmin]);
 
   const filtered = validations.filter((v) => {
     const matchesSearch = !search || v.name.toLowerCase().includes(search.toLowerCase()) ||
-      (v.settings?.siteName || "").toLowerCase().includes(search.toLowerCase()) ||
-      (v.settings?.site || "").toLowerCase().includes(search.toLowerCase());
+      getSite(v).toLowerCase().includes(search.toLowerCase()) ||
+      (isAdmin && getContractorName(v).toLowerCase().includes(search.toLowerCase()));
     const matchesStatus = statusFilter === "all" || v.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    const matchesContractor = contractorFilter === "all" || getContractorName(v) === contractorFilter;
+    const matchesSite = siteFilter === "all" || getSite(v) === siteFilter;
+    const matchesCountry = countryFilter === "all" || getCountry(v) === countryFilter;
+    return matchesSearch && matchesStatus && matchesContractor && matchesSite && matchesCountry;
   });
 
   return (
@@ -188,7 +229,10 @@ const Dashboard = () => {
           <div className="flex items-center gap-3">
             <img src={bravegenLogo} alt="BraveGen" className="h-10" />
             <div className="hidden sm:block">
-              <h1 className="text-xl font-bold text-foreground tracking-tight">Dashboard</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl font-bold text-foreground tracking-tight">Dashboard</h1>
+                {isAdmin && <Badge className="bg-primary/20 text-primary border-primary/40 text-xs gap-1"><Shield className="h-3 w-3" />Admin</Badge>}
+              </div>
               <p className="text-xs text-muted-foreground">{user?.email}</p>
             </div>
           </div>
@@ -204,21 +248,53 @@ const Dashboard = () => {
       </header>
 
       <main className="mx-auto max-w-7xl px-6 py-8 space-y-6">
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input placeholder="Search by name or site..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
+        {/* Search & Filters */}
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input placeholder={isAdmin ? "Search by name, site, or contractor..." : "Search by name or site..."} value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
+            </div>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-[140px]"><SelectValue placeholder="All statuses" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Statuses</SelectItem>
+                <SelectItem value="draft">Draft</SelectItem>
+                <SelectItem value="complete">Complete</SelectItem>
+                <SelectItem value="exported">Exported</SelectItem>
+                <SelectItem value="submitted">Submitted</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-[140px]"><SelectValue placeholder="All statuses" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Statuses</SelectItem>
-              <SelectItem value="draft">Draft</SelectItem>
-              <SelectItem value="complete">Complete</SelectItem>
-              <SelectItem value="exported">Exported</SelectItem>
-              <SelectItem value="submitted">Submitted</SelectItem>
-            </SelectContent>
-          </Select>
+
+          {/* Admin-only filters */}
+          {isAdmin && (
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Select value={contractorFilter} onValueChange={setContractorFilter}>
+                <SelectTrigger className="w-[180px]"><SelectValue placeholder="All contractors" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Contractors</SelectItem>
+                  {uniqueContractors.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={siteFilter} onValueChange={setSiteFilter}>
+                <SelectTrigger className="w-[180px]"><SelectValue placeholder="All sites" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Sites</SelectItem>
+                  {uniqueSites.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              {uniqueCountries.length > 0 && (
+                <Select value={countryFilter} onValueChange={setCountryFilter}>
+                  <SelectTrigger className="w-[180px]"><SelectValue placeholder="All countries" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Countries</SelectItem>
+                    {uniqueCountries.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+          )}
         </div>
 
         {loading ? (
@@ -246,6 +322,7 @@ const Dashboard = () => {
               const tt = getToolType(v);
               const ToolIcon = tt === "pulse" ? (v.settings?.meterMode === "gas" ? Flame : Droplets) : Zap;
               const modeLabel = tt === "pulse" ? (v.settings?.meterMode === "gas" ? "Gas" : "Water") : "Electricity";
+              const isOwn = v.user_id === user?.id;
               return (
                 <div
                   key={v.id}
@@ -257,7 +334,8 @@ const Dashboard = () => {
                     <div className="min-w-0">
                       <p className="font-semibold text-foreground truncate">{v.name}</p>
                       <p className="text-xs text-muted-foreground">
-                        {modeLabel} · {(v.settings?.siteName || v.settings?.site || "")} · Updated {new Date(v.updated_at).toLocaleDateString()}
+                        {modeLabel} · {getSite(v) || "No site"} · Updated {new Date(v.updated_at).toLocaleDateString()}
+                        {isAdmin && !isOwn && ` · ${getContractorName(v)}`}
                       </p>
                     </div>
                   </div>
