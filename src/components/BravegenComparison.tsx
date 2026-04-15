@@ -47,6 +47,8 @@ interface BravegenComparisonProps {
   readings: MeterReading[];
   onDataChange?: (data: ComparisonExportRow[]) => void;
   onRawDataChange?: (data: BravegenRawRow[]) => void;
+  initialBravegenRawData?: BravegenRawRow[];
+  initialComparisonData?: ComparisonExportRow[];
 }
 
 function parseDate(val: any): Date | null {
@@ -126,11 +128,38 @@ function bgKey(row: BravegenRow, idx: number): string {
   return `${row.loadName}||${row.eventDate?.toISOString() ?? idx}`;
 }
 
-const BravegenComparison = ({ readings, onDataChange, onRawDataChange }: BravegenComparisonProps) => {
-  const [bravegenData, setBravegenData] = useState<BravegenRow[]>([]);
-  const [fileName, setFileName] = useState<string | null>(null);
+const BravegenComparison = ({ readings, onDataChange, onRawDataChange, initialBravegenRawData, initialComparisonData }: BravegenComparisonProps) => {
+  const [bravegenData, setBravegenData] = useState<BravegenRow[]>(() => {
+    if (initialBravegenRawData && initialBravegenRawData.length > 0) {
+      return initialBravegenRawData.map(r => ({
+        event: r.event,
+        eventDate: r.event ? parseDate(r.event) : null,
+        loadName: r.loadName,
+        channelKey: r.channelKey,
+        reference: r.reference,
+        utilityType: r.utilityType,
+        unit: r.unit,
+        usage: r.usage,
+      }));
+    }
+    return [];
+  });
+  const [fileName, setFileName] = useState<string | null>(initialBravegenRawData && initialBravegenRawData.length > 0 ? "Restored from saved data" : null);
   const [isDragging, setIsDragging] = useState(false);
-  const [comparisonRows, setComparisonRows] = useState<ComparisonRow[]>([]);
+  const [comparisonRows, setComparisonRows] = useState<ComparisonRow[]>(() => {
+    if (initialComparisonData && initialComparisonData.length > 0) {
+      return initialComparisonData.map(c => ({
+        id: crypto.randomUUID(),
+        bravegenKey: "",
+        extractedId: readings.find(r => r.loadName === c.loadName)?.id || "",
+        calculated: c.accuracy != null,
+        accuracy: c.accuracy,
+        bravegenUsage: c.bravegenUsage,
+        extractedReading: c.physicalMeterRead,
+      }));
+    }
+    return [];
+  });
 
   const processRows = useCallback((json: any[]) => {
     if (json.length === 0) return;

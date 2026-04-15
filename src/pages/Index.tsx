@@ -411,7 +411,7 @@ const Index = () => {
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
             BraveGen Data Comparison
           </h2>
-          <BravegenComparison readings={readings} onDataChange={setComparisonData} onRawDataChange={setBravegenRawData} />
+          <BravegenComparison readings={readings} onDataChange={setComparisonData} onRawDataChange={setBravegenRawData} initialBravegenRawData={bravegenRawData} initialComparisonData={comparisonData} />
         </div>
 
         {/* Actions */}
