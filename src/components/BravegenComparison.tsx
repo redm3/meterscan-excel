@@ -47,6 +47,8 @@ interface BravegenComparisonProps {
   readings: MeterReading[];
   onDataChange?: (data: ComparisonExportRow[]) => void;
   onRawDataChange?: (data: BravegenRawRow[]) => void;
+  initialBravegenRawData?: BravegenRawRow[];
+  initialComparisonData?: ComparisonExportRow[];
 }
 
 function parseDate(val: any): Date | null {
