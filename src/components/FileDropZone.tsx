@@ -13,6 +13,7 @@ interface FileDropZoneProps {
 const FileDropZone = ({ onFilesSelected, isProcessing, queuedFiles, onRemoveFile, onClearFiles }: FileDropZoneProps) => {
   const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
