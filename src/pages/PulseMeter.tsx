@@ -452,6 +452,7 @@ const PulseMeter = () => {
         comments,
         accuracy,
         status: status.label,
+        rawHubData,
       }));
 
       if (currentValidationId) {
