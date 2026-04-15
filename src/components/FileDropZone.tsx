@@ -1,5 +1,5 @@
 import { useCallback, useState, useRef } from "react";
-import { Upload, FileText, Image, X } from "lucide-react";
+import { Upload, FileText, Image, X, Camera } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface FileDropZoneProps {
