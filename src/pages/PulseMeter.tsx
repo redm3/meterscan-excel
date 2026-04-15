@@ -185,6 +185,7 @@ const PulseMeter = () => {
         if (vd.overrideHubCount) setOverrideHubCount(vd.overrideHubCount);
         if (vd.overrideFactor) setOverrideFactor(vd.overrideFactor);
         if (vd.comments) setComments(vd.comments);
+        if (vd.rawHubData) setRawHubData(vd.rawHubData);
       }
     };
 
