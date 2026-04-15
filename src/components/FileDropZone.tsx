@@ -1,5 +1,5 @@
 import { useCallback, useState, useRef } from "react";
-import { Upload, FileText, Image, X } from "lucide-react";
+import { Upload, FileText, Image, X, Camera } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface FileDropZoneProps {
@@ -13,6 +13,7 @@ interface FileDropZoneProps {
 const FileDropZone = ({ onFilesSelected, isProcessing, queuedFiles, onRemoveFile, onClearFiles }: FileDropZoneProps) => {
   const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -42,47 +43,85 @@ const FileDropZone = ({ onFilesSelected, isProcessing, queuedFiles, onRemoveFile
     [onFilesSelected]
   );
 
+  const handleCameraChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files || []);
+      if (files.length > 0) onFilesSelected(files);
+      if (cameraRef.current) cameraRef.current.value = "";
+    },
+    [onFilesSelected]
+  );
+
   const acceptedTypes = ".pdf,.png,.jpg,.jpeg,.webp";
 
   return (
     <div className="space-y-3">
-      <div
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-        className={`
-          relative flex flex-col items-center justify-center gap-4
-          rounded-lg border-2 border-dashed p-10 transition-all duration-300 cursor-pointer
-          ${isDragging
-            ? "border-primary bg-primary/10"
-            : "border-border bg-surface hover:border-primary/50 hover:bg-surface-elevated"
-          }
-          ${isProcessing ? "pointer-events-none opacity-60" : ""}
-        `}
-        onClick={() => !isProcessing && inputRef.current?.click()}
-      >
-        <input
-          ref={inputRef}
-          type="file"
-          accept={acceptedTypes}
-          multiple
-          onChange={handleFileChange}
-          className="hidden"
-        />
-        <div className="flex items-center gap-3 text-muted-foreground">
-          <FileText className="h-8 w-8" />
-          <Image className="h-8 w-8" />
-        </div>
-        <Upload className="h-12 w-12 text-primary" />
-        <div className="text-center">
-          <p className="text-lg font-semibold text-foreground">
-            Drag & Drop PDFs or Screenshots Here
+      <div className="flex flex-col sm:flex-row gap-3">
+        {/* Drop zone for file selection */}
+        <div
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className={`
+            relative flex flex-col items-center justify-center gap-4
+            rounded-lg border-2 border-dashed p-10 transition-all duration-300 cursor-pointer flex-1
+            ${isDragging
+              ? "border-primary bg-primary/10"
+              : "border-border bg-surface hover:border-primary/50 hover:bg-surface-elevated"
+            }
+            ${isProcessing ? "pointer-events-none opacity-60" : ""}
+          `}
+          onClick={() => !isProcessing && inputRef.current?.click()}
+        >
+          <input
+            ref={inputRef}
+            type="file"
+            accept={acceptedTypes}
+            multiple
+            onChange={handleFileChange}
+            className="hidden"
+          />
+          <div className="flex items-center gap-3 text-muted-foreground">
+            <FileText className="h-8 w-8" />
+            <Image className="h-8 w-8" />
+          </div>
+          <Upload className="h-12 w-12 text-primary" />
+          <div className="text-center">
+            <p className="text-lg font-semibold text-foreground">
+              Drag & Drop PDFs or Screenshots Here
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">or click to browse files — drop multiple at once</p>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Supports PDF, PNG, JPG formats
           </p>
-          <p className="mt-1 text-sm text-muted-foreground">or click to browse files — drop multiple at once</p>
         </div>
-        <p className="text-xs text-muted-foreground">
-          Supports PDF, PNG, JPG formats
-        </p>
+
+        {/* Camera capture button */}
+        <div
+          className={`
+            flex flex-col items-center justify-center gap-3
+            rounded-lg border-2 border-dashed p-6 transition-all duration-300 cursor-pointer
+            border-border bg-surface hover:border-primary/50 hover:bg-surface-elevated
+            sm:w-48
+            ${isProcessing ? "pointer-events-none opacity-60" : ""}
+          `}
+          onClick={() => !isProcessing && cameraRef.current?.click()}
+        >
+          <input
+            ref={cameraRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={handleCameraChange}
+            className="hidden"
+          />
+          <Camera className="h-12 w-12 text-primary" />
+          <div className="text-center">
+            <p className="text-sm font-semibold text-foreground">Take Photo</p>
+            <p className="mt-1 text-xs text-muted-foreground">Use camera</p>
+          </div>
+        </div>
       </div>
 
       {/* Queued file thumbnails */}
